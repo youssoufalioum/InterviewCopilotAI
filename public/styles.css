@@ -297,3 +297,48 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+.conversation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.msg-row {
+  display: flex;
+  flex-direction: column;
+  max-width: 82%;
+  gap: 4px;
+}
+
+.msg-left {
+  align-self: flex-start;
+}
+
+.msg-right {
+  align-self: flex-end;
+}
+
+.msg-bubble {
+  border-radius: 14px;
+  padding: 10px 12px;
+  border: 1px solid #dbe3f1;
+  box-shadow: 0 1px 1px rgba(15, 23, 42, 0.05);
+}
+
+.msg-bubble.interviewer {
+  background: #f1f5ff;
+  color: #1f2937;
+}
+
+.msg-bubble.candidate {
+  background: #dff8ea;
+  color: #065f46;
+  border-color: #bfead1;
+}
+
+.msg-meta {
+  font-size: 0.76rem;
+  color: #6b7280;
+  padding: 0 6px;
+}
