@@ -41,12 +41,18 @@ function extractSuggestions(event) {
   if (directTexts.length > 0) return directTexts.join('\n');
 
   const outputTexts = extractStringsByKey(event, 'output_text');
-  return outputTexts.join('\n');
+  if (outputTexts.length > 0) return outputTexts.join('\n');
+
+  const outputTranscriptionTexts = extractStringsByKey(event, 'output_transcription');
+  return outputTranscriptionTexts.join('\n');
 }
 
 function extractTranscript(event) {
   const transcripts = extractStringsByKey(event, 'transcript');
-  return transcripts.join('\n');
+  if (transcripts.length > 0) return transcripts.join('\n');
+
+  const inputTranscriptions = extractStringsByKey(event, 'input_transcription');
+  return inputTranscriptions.join('\n');
 }
 
 wss.on('connection', (clientSocket) => {
@@ -57,7 +63,7 @@ wss.on('connection', (clientSocket) => {
   }
 
   const geminiUrl =
-    'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BiDiGenerateContent';
+    'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent';
 
   const geminiSocket = new WebSocket(`${geminiUrl}?key=${encodeURIComponent(GEMINI_API_KEY)}`);
 
@@ -70,11 +76,10 @@ wss.on('connection', (clientSocket) => {
       JSON.stringify({
         setup: {
           model: 'models/gemini-2.0-flash-live-001',
-          generationConfig: {
-            responseModalities: ['TEXT']
+          generation_config: {
+            response_modalities: ['TEXT']
           },
-          systemInstruction: {
-            role: 'system',
+          system_instruction: {
             parts: [{ text: SYSTEM_INSTRUCTION }]
           }
         }
@@ -115,6 +120,7 @@ wss.on('connection', (clientSocket) => {
 
   geminiSocket.on('close', (code, reasonBuffer) => {
     const reason = reasonBuffer?.toString('utf8') || 'Gemini socket closed';
+    console.warn(`[gemini-close] code=${code} reason=${reason}`);
     if (clientSocket.readyState === WebSocket.OPEN) {
       clientSocket.send(JSON.stringify({ type: 'status', message: `Gemini disconnected (${code}): ${reason}` }));
       clientSocket.close();
@@ -122,6 +128,7 @@ wss.on('connection', (clientSocket) => {
   });
 
   geminiSocket.on('error', (error) => {
+    console.error('[gemini-error]', error);
     if (clientSocket.readyState === WebSocket.OPEN) {
       clientSocket.send(JSON.stringify({ type: 'error', message: `Gemini error: ${error.message}` }));
       clientSocket.close();
@@ -141,10 +148,10 @@ wss.on('connection', (clientSocket) => {
 
     geminiSocket.send(
       JSON.stringify({
-        realtimeInput: {
-          mediaChunks: [
+        realtime_input: {
+          media_chunks: [
             {
-              mimeType: 'audio/pcm;rate=16000',
+              mime_type: 'audio/pcm;rate=16000',
               data: base64Audio
             }
           ]
