@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Interview Copilot</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <aside class="left-column card">
+        <div class="video-surface">
+          <div class="video-toolbar">
+            <button type="button" class="chip">Fullscreen</button>
+            <button type="button" class="chip">Change Tab</button>
+          </div>
+          <div class="video-grid">
+            <div class="video-main">Screen / Meeting Preview</div>
+            <div class="video-side">Speaker Cam</div>
+          </div>
+        </div>
+
+        <section class="transcript-panel">
+          <div class="panel-head">
+            <h2>Transcript</h2>
+            <div class="head-actions">
+              <button type="button" class="ghost-button">Connect</button>
+              <button type="button" class="ghost-button">Clear</button>
+            </div>
+          </div>
+          <div id="transcriptBox" class="chat-scroll transcript-box"></div>
+        </section>
+      </aside>
+
+      <section class="right-column card">
+        <header class="assistant-header">
+          <div class="assistant-brand">
+            <span class="brand-dot"></span>
+            <div>
+              <h1>Interview Copilot</h1>
+              <p id="status">Prêt.</p>
+            </div>
+          </div>
+
+          <div class="assistant-controls">
+            <span class="timer-pill">⚙ 7 mins (Free)</span>
+            <button id="toggleAssistant" class="assistant-toggle" type="button">Démarrer l'Assistant</button>
+          </div>
+        </header>
+
+        <article class="answer-card">
+          <h3>⭐ Suggestions de l'IA</h3>
+          <div id="suggestionBox" class="chat-scroll suggestion-box"></div>
+        </article>
+
+        <footer class="bottom-actions">
+          <button type="button" class="cta-main">⚡ AI Answer</button>
+          <button type="button" class="cta-secondary">🖥 Analyze Screen</button>
+        </footer>
+      </section>
+    </main>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
