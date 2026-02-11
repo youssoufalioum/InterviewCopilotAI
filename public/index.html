@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Interview Copilot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="min-h-screen bg-slate-950 text-slate-100">
+    <main class="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-6 py-8">
+      <header class="mb-6 rounded-2xl border border-slate-800/70 bg-slate-900/55 p-6 shadow-2xl backdrop-blur-xl">
+        <h1 class="text-2xl font-semibold tracking-tight">Interview Copilot</h1>
+        <p class="mt-2 text-sm text-slate-300">
+          Assistant discret en temps réel pour entretiens techniques (audio micro + système).
+        </p>
+
+        <div class="mt-5 flex flex-wrap items-center gap-3">
+          <button
+            id="toggleAssistant"
+            class="rounded-xl bg-cyan-500 px-5 py-2.5 font-medium text-slate-950 transition hover:bg-cyan-400 active:scale-[0.99]"
+          >
+            Démarrer l'Assistant
+          </button>
+          <span id="status" class="text-sm text-slate-300">Prêt.</span>
+        </div>
+      </header>
+
+      <section class="grid flex-1 grid-cols-1 gap-6 lg:grid-cols-2">
+        <article class="rounded-2xl border border-slate-800/60 bg-slate-900/45 p-5 shadow-xl backdrop-blur-xl">
+          <h2 class="mb-3 text-lg font-medium text-cyan-300">Transcription en direct</h2>
+          <div
+            id="transcriptBox"
+            class="h-[50vh] overflow-auto whitespace-pre-wrap rounded-xl bg-black/30 p-4 text-sm leading-6 text-slate-200"
+          ></div>
+        </article>
+
+        <article class="rounded-2xl border border-slate-800/60 bg-slate-900/45 p-5 shadow-xl backdrop-blur-xl">
+          <h2 class="mb-3 text-lg font-medium text-emerald-300">Suggestions de l'IA</h2>
+          <div
+            id="suggestionBox"
+            class="h-[50vh] overflow-auto whitespace-pre-wrap rounded-xl bg-black/30 p-4 text-sm leading-6 text-slate-200"
+          ></div>
+        </article>
+      </section>
+    </main>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
