@@ -1,0 +1,139 @@
+:root {
+  color-scheme: dark;
+  --bg: #020617;
+  --card: rgba(15, 23, 42, 0.55);
+  --card-border: rgba(51, 65, 85, 0.7);
+  --text: #f1f5f9;
+  --muted: #cbd5e1;
+  --cyan: #06b6d4;
+  --cyan-hover: #22d3ee;
+  --rose: #f43f5e;
+  --rose-hover: #fb7185;
+  --green: #34d399;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif;
+  background: radial-gradient(circle at 0% 0%, #0f172a 0%, var(--bg) 45%);
+  color: var(--text);
+}
+
+.app-shell {
+  width: min(1100px, 100% - 48px);
+  margin: 0 auto;
+  padding: 32px 0;
+}
+
+.glass-card {
+  border: 1px solid var(--card-border);
+  background: var(--card);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-radius: 18px;
+  box-shadow: 0 18px 40px rgba(2, 6, 23, 0.45);
+}
+
+.hero-card {
+  padding: 24px;
+  margin-bottom: 22px;
+}
+
+.hero-card h1 {
+  margin: 0;
+  font-size: clamp(1.5rem, 2vw, 2rem);
+}
+
+.hero-card p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.controls-row {
+  margin-top: 18px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.assistant-toggle {
+  border: 0;
+  border-radius: 12px;
+  padding: 10px 18px;
+  font-weight: 600;
+  cursor: pointer;
+  color: #082f49;
+  background: var(--cyan);
+  transition: background 0.2s ease, transform 0.1s ease;
+}
+
+.assistant-toggle:hover {
+  background: var(--cyan-hover);
+}
+
+.assistant-toggle:active {
+  transform: scale(0.99);
+}
+
+.assistant-toggle.is-running {
+  color: #ffffff;
+  background: var(--rose);
+}
+
+.assistant-toggle.is-running:hover {
+  background: var(--rose-hover);
+}
+
+.status-text {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+}
+
+@media (min-width: 980px) {
+  .dashboard-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.panel-card {
+  padding: 18px;
+}
+
+.panel-card h2 {
+  margin: 0 0 12px;
+  font-size: 1.08rem;
+  font-weight: 600;
+}
+
+.title-cyan {
+  color: #67e8f9;
+}
+
+.title-green {
+  color: #6ee7b7;
+}
+
+.output-box {
+  height: 50vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.28);
+  padding: 14px;
+  line-height: 1.55;
+  font-size: 0.92rem;
+  color: #e2e8f0;
+}
