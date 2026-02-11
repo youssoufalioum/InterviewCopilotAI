@@ -1,7 +1,12 @@
-const http = require('http');
-const path = require('path');
-const express = require('express');
-const { WebSocketServer, WebSocket } = require('ws');
+import http from 'node:http';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import express from 'express';
+import { WebSocketServer, WebSocket } from 'ws';
+import { GoogleGenAI, Modality } from '@google/genai';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const PORT = process.env.PORT || 3000;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
@@ -9,8 +14,10 @@ const SYSTEM_INSTRUCTION =
   "Tu es un expert technique qui aide un candidat en toute discrétion. Écoute les questions du recruteur. Réponds de manière concise, donne des points clés techniques, des exemples de code si nécessaire, et garde un ton professionnel. Si tu n'as pas entendu la question, reste silencieux.";
 
 if (!GEMINI_API_KEY) {
-  console.warn('[warn] GEMINI_API_KEY is missing. WebSocket proxy will reject new sessions.');
+  console.warn('[warn] GEMINI_API_KEY is missing. Live sessions will be rejected.');
 }
+
+const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
 
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
@@ -36,6 +43,14 @@ function extractStringsByKey(node, wantedKey, results = []) {
   return results;
 }
 
+function extractTranscript(event) {
+  const transcripts = extractStringsByKey(event, 'transcript');
+  if (transcripts.length > 0) return transcripts.join('\n');
+
+  const inputTranscriptions = extractStringsByKey(event, 'input_transcription');
+  return inputTranscriptions.join('\n');
+}
+
 function extractSuggestions(event) {
   const directTexts = extractStringsByKey(event, 'text');
   if (directTexts.length > 0) return directTexts.join('\n');
@@ -47,96 +62,65 @@ function extractSuggestions(event) {
   return outputTranscriptionTexts.join('\n');
 }
 
-function extractTranscript(event) {
-  const transcripts = extractStringsByKey(event, 'transcript');
-  if (transcripts.length > 0) return transcripts.join('\n');
-
-  const inputTranscriptions = extractStringsByKey(event, 'input_transcription');
-  return inputTranscriptions.join('\n');
+function sendToClient(clientSocket, payload) {
+  if (clientSocket.readyState === WebSocket.OPEN) {
+    clientSocket.send(JSON.stringify(payload));
+  }
 }
 
-wss.on('connection', (clientSocket) => {
-  if (!GEMINI_API_KEY) {
-    clientSocket.send(JSON.stringify({ type: 'error', message: 'GEMINI_API_KEY is not configured on the server.' }));
+wss.on('connection', async (clientSocket) => {
+  if (!ai) {
+    sendToClient(clientSocket, { type: 'error', message: 'GEMINI_API_KEY is not configured on the server.' });
     clientSocket.close(1011, 'Missing server API key');
     return;
   }
 
-  const geminiUrl =
-    'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent';
+  let liveSession;
 
-  const geminiSocket = new WebSocket(`${geminiUrl}?key=${encodeURIComponent(GEMINI_API_KEY)}`);
+  try {
+    liveSession = await ai.live.connect({
+      model: 'gemini-2.0-flash-live-001',
+      config: {
+        responseModalities: [Modality.TEXT],
+        systemInstruction: SYSTEM_INSTRUCTION
+      },
+      callbacks: {
+        onopen: () => {
+          sendToClient(clientSocket, { type: 'status', message: 'Connected to Gemini Live (SDK).' });
+        },
+        onmessage: (message) => {
+          const transcript = extractTranscript(message);
+          const suggestion = extractSuggestions(message);
 
-  let geminiReady = false;
-
-  geminiSocket.on('open', () => {
-    geminiReady = true;
-
-    geminiSocket.send(
-      JSON.stringify({
-        setup: {
-          model: 'models/gemini-2.0-flash-live-001',
-          generation_config: {
-            response_modalities: ['TEXT']
-          },
-          system_instruction: {
-            parts: [{ text: SYSTEM_INSTRUCTION }]
+          sendToClient(clientSocket, {
+            type: 'gemini',
+            transcript,
+            suggestion,
+            raw: message
+          });
+        },
+        onerror: (error) => {
+          sendToClient(clientSocket, { type: 'error', message: `Gemini SDK error: ${error.message}` });
+        },
+        onclose: (event) => {
+          sendToClient(clientSocket, {
+            type: 'status',
+            message: `Gemini disconnected (${event?.code ?? 'n/a'}): ${event?.reason ?? 'session closed'}`
+          });
+          if (clientSocket.readyState === WebSocket.OPEN) {
+            clientSocket.close();
           }
         }
-      })
-    );
+      }
+    });
+  } catch (error) {
+    sendToClient(clientSocket, { type: 'error', message: `Unable to initialize Gemini SDK session: ${error.message}` });
+    clientSocket.close(1011, 'Gemini init error');
+    return;
+  }
 
-    clientSocket.send(JSON.stringify({ type: 'status', message: 'Connected to Gemini Live.' }));
-  });
-
-  geminiSocket.on('message', (rawMessage, isBinary) => {
-    if (isBinary) {
-      clientSocket.send(rawMessage, { binary: true });
-      return;
-    }
-
-    const textPayload = rawMessage.toString('utf8');
-    let parsed;
-
-    try {
-      parsed = JSON.parse(textPayload);
-    } catch {
-      clientSocket.send(JSON.stringify({ type: 'gemini_raw', payload: textPayload }));
-      return;
-    }
-
-    const transcript = extractTranscript(parsed);
-    const suggestion = extractSuggestions(parsed);
-
-    clientSocket.send(
-      JSON.stringify({
-        type: 'gemini',
-        transcript,
-        suggestion,
-        raw: parsed
-      })
-    );
-  });
-
-  geminiSocket.on('close', (code, reasonBuffer) => {
-    const reason = reasonBuffer?.toString('utf8') || 'Gemini socket closed';
-    console.warn(`[gemini-close] code=${code} reason=${reason}`);
-    if (clientSocket.readyState === WebSocket.OPEN) {
-      clientSocket.send(JSON.stringify({ type: 'status', message: `Gemini disconnected (${code}): ${reason}` }));
-      clientSocket.close();
-    }
-  });
-
-  geminiSocket.on('error', (error) => {
-    console.error('[gemini-error]', error);
-    if (clientSocket.readyState === WebSocket.OPEN) {
-      clientSocket.send(JSON.stringify({ type: 'error', message: `Gemini error: ${error.message}` }));
-      clientSocket.close();
-    }
-  });
-
-  clientSocket.on('message', (chunk, isBinary) => {
-    if (!geminiReady || geminiSocket.readyState !== WebSocket.OPEN) return;
+  clientSocket.on('message', async (chunk, isBinary) => {
+    if (!liveSession) return;
 
     if (!isBinary) {
       const text = chunk.toString('utf8');
@@ -144,32 +128,35 @@ wss.on('connection', (clientSocket) => {
       return;
     }
 
-    const base64Audio = Buffer.from(chunk).toString('base64');
-
-    geminiSocket.send(
-      JSON.stringify({
-        realtime_input: {
-          media_chunks: [
-            {
-              mime_type: 'audio/pcm;rate=16000',
-              data: base64Audio
-            }
-          ]
+    try {
+      const base64Audio = Buffer.from(chunk).toString('base64');
+      await liveSession.sendRealtimeInput({
+        media: {
+          mimeType: 'audio/pcm;rate=16000',
+          data: base64Audio
         }
-      })
-    );
+      });
+    } catch (error) {
+      sendToClient(clientSocket, { type: 'error', message: `Audio forwarding error: ${error.message}` });
+    }
   });
 
-  clientSocket.on('close', () => {
-    if (geminiSocket.readyState === WebSocket.OPEN || geminiSocket.readyState === WebSocket.CONNECTING) {
-      geminiSocket.close();
+  const closeSession = async () => {
+    if (!liveSession) return;
+    try {
+      await liveSession.close();
+    } catch {
+      // ignore teardown errors
     }
+    liveSession = null;
+  };
+
+  clientSocket.on('close', () => {
+    closeSession();
   });
 
   clientSocket.on('error', () => {
-    if (geminiSocket.readyState === WebSocket.OPEN || geminiSocket.readyState === WebSocket.CONNECTING) {
-      geminiSocket.close();
-    }
+    closeSession();
   });
 });
 

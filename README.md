@@ -28,3 +28,8 @@ npm start
 ```
 
 Puis ouvrez `http://localhost:3000`.
+
+
+## Stack Gemini
+
+Le backend utilise désormais le SDK officiel `@google/genai` (`import { GoogleGenAI, Modality } from '@google/genai';`) pour établir la session Live et envoyer l'audio PCM temps réel.
