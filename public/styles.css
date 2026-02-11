@@ -85,6 +85,43 @@ body {
   font-size: 0.9rem;
 }
 
+
+.preview-stage {
+  position: relative;
+  overflow: hidden;
+  background: #0f172a;
+}
+
+.preview-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  background: #020617;
+}
+
+.preview-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #cbd5e1;
+  font-size: 0.95rem;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.2), rgba(15, 23, 42, 0.45));
+  pointer-events: none;
+}
+
+.preview-stage:fullscreen {
+  border-radius: 0;
+  border: 0;
+  background: #000;
+}
+
+.preview-stage:fullscreen .preview-video {
+  object-fit: contain;
+}
+
 .transcript-panel {
   display: flex;
   flex-direction: column;

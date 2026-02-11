@@ -2,6 +2,11 @@ const toggleButton = document.getElementById('toggleAssistant');
 const statusLabel = document.getElementById('status');
 const transcriptBox = document.getElementById('transcriptBox');
 const suggestionBox = document.getElementById('suggestionBox');
+const previewStage = document.getElementById('previewStage');
+const previewVideo = document.getElementById('previewVideo');
+const previewPlaceholder = document.getElementById('previewPlaceholder');
+const fullscreenButton = document.getElementById('fullscreenButton');
+const changeTabButton = document.getElementById('changeTabButton');
 
 let socket;
 let audioContext;
@@ -11,6 +16,8 @@ let systemStream;
 let mixedNode;
 let micSource;
 let systemSource;
+let micGainNode;
+let systemGainNode;
 let sendInterval;
 let isRunning = false;
 
@@ -30,18 +37,18 @@ function appendLine(target, text) {
 }
 
 function formatPermissionError(error) {
-  if (!error) return "Permission audio refusée.";
+  if (!error) return 'Permission audio refusée.';
 
   if (error.name === 'NotAllowedError') {
     return "Permission audio refusée. Autorise le micro ET le partage d'écran avec audio système, puis relance l'assistant.";
   }
 
   if (error.name === 'NotFoundError') {
-    return "Aucune source audio trouvée (micro ou audio système indisponible).";
+    return 'Aucune source audio trouvée (micro ou audio système indisponible).';
   }
 
   if (error.name === 'NotReadableError') {
-    return "La source audio est déjà utilisée par une autre application.";
+    return 'La source audio est déjà utilisée par une autre application.';
   }
 
   return `Impossible de démarrer: ${error.message}`;
@@ -61,10 +68,7 @@ function downsampleTo16kHz(float32Buffer, sourceSampleRate) {
   let sourceOffset = 0;
 
   while (resultOffset < result.length) {
-    const nextSourceOffset = Math.min(
-      float32Buffer.length,
-      Math.round((resultOffset + 1) * ratio)
-    );
+    const nextSourceOffset = Math.min(float32Buffer.length, Math.round((resultOffset + 1) * ratio));
 
     let total = 0;
     let count = 0;
@@ -114,6 +118,101 @@ function sendPendingChunk() {
   }
 }
 
+async function attachPreviewStream(stream) {
+  const videoTracks = stream.getVideoTracks();
+  if (videoTracks.length === 0) {
+    previewVideo.srcObject = null;
+    previewPlaceholder.hidden = false;
+    return;
+  }
+
+  previewVideo.srcObject = new MediaStream([videoTracks[0]]);
+  previewPlaceholder.hidden = true;
+
+  try {
+    await previewVideo.play();
+  } catch {
+    // Ignore autoplay errors; user interaction on the page usually unlocks play.
+  }
+
+  videoTracks[0].addEventListener('ended', () => {
+    previewVideo.srcObject = null;
+    previewPlaceholder.hidden = false;
+  });
+}
+
+function clearPreviewStream() {
+  previewVideo.pause();
+  previewVideo.srcObject = null;
+  previewPlaceholder.hidden = false;
+}
+
+async function requestSystemShare() {
+  return navigator.mediaDevices.getDisplayMedia({
+    video: {
+      frameRate: { ideal: 30, max: 60 }
+    },
+    audio: {
+      channelCount: 2,
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false
+    }
+  });
+}
+
+async function replaceSystemStream(newStream) {
+  const previousStream = systemStream;
+
+  if (systemSource) {
+    systemSource.disconnect();
+    systemSource = null;
+  }
+
+  systemStream = newStream;
+  await attachPreviewStream(systemStream);
+
+  if (audioContext && systemGainNode) {
+    systemSource = audioContext.createMediaStreamSource(systemStream);
+    systemSource.connect(systemGainNode);
+  }
+
+  if (previousStream) {
+    previousStream.getTracks().forEach((track) => track.stop());
+  }
+}
+
+async function handleChangeTab() {
+  if (!isRunning) {
+    setStatus("Démarre l'assistant pour partager un onglet.");
+    return;
+  }
+
+  try {
+    setStatus('Sélectionne un nouvel onglet à partager...');
+    const newStream = await requestSystemShare();
+    await replaceSystemStream(newStream);
+    setStatus('Nouvel onglet partagé.');
+  } catch (error) {
+    const message = formatPermissionError(error);
+    setStatus(message);
+  }
+}
+
+async function togglePreviewFullscreen() {
+  if (document.fullscreenElement === previewStage) {
+    await document.exitFullscreen();
+    return;
+  }
+
+  await previewStage.requestFullscreen();
+}
+
+function syncFullscreenButton() {
+  const isFullscreen = document.fullscreenElement === previewStage;
+  fullscreenButton.textContent = isFullscreen ? 'Exit Fullscreen' : 'Fullscreen';
+}
+
 async function startAssistant() {
   if (isRunning) return;
   isRunning = true;
@@ -132,16 +231,9 @@ async function startAssistant() {
       }
     });
 
-    // getDisplayMedia est requis pour capturer le son système. Certaines plateformes demandent video: true.
-    systemStream = await navigator.mediaDevices.getDisplayMedia({
-      video: true,
-      audio: {
-        channelCount: 2,
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false
-      }
-    });
+    // getDisplayMedia est requis pour capturer le son système + afficher l'onglet partagé dans la preview.
+    systemStream = await requestSystemShare();
+    await attachPreviewStream(systemStream);
 
     socket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`);
     socket.binaryType = 'arraybuffer';
@@ -181,18 +273,18 @@ async function startAssistant() {
     micSource = audioContext.createMediaStreamSource(microphoneStream);
     systemSource = audioContext.createMediaStreamSource(systemStream);
 
-    const micGain = audioContext.createGain();
-    const systemGain = audioContext.createGain();
+    micGainNode = audioContext.createGain();
+    systemGainNode = audioContext.createGain();
     mixedNode = audioContext.createGain();
 
-    micGain.gain.value = 1.0;
-    systemGain.gain.value = 1.0;
+    micGainNode.gain.value = 1.0;
+    systemGainNode.gain.value = 1.0;
 
-    micSource.connect(micGain);
-    systemSource.connect(systemGain);
+    micSource.connect(micGainNode);
+    systemSource.connect(systemGainNode);
 
-    micGain.connect(mixedNode);
-    systemGain.connect(mixedNode);
+    micGainNode.connect(mixedNode);
+    systemGainNode.connect(mixedNode);
 
     workletNode = new AudioWorkletNode(audioContext, 'pcm-mix-processor', {
       numberOfInputs: 1,
@@ -260,6 +352,16 @@ async function stopAssistant(options = {}) {
     systemSource = null;
   }
 
+  if (micGainNode) {
+    micGainNode.disconnect();
+    micGainNode = null;
+  }
+
+  if (systemGainNode) {
+    systemGainNode.disconnect();
+    systemGainNode = null;
+  }
+
   if (audioContext) {
     await audioContext.close();
     audioContext = null;
@@ -275,6 +377,12 @@ async function stopAssistant(options = {}) {
     systemStream = null;
   }
 
+  clearPreviewStream();
+
+  if (document.fullscreenElement === previewStage) {
+    await document.exitFullscreen();
+  }
+
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.close();
   }
@@ -286,6 +394,18 @@ async function stopAssistant(options = {}) {
     setStatus('Assistant arrêté.');
   }
 }
+
+document.addEventListener('fullscreenchange', syncFullscreenButton);
+fullscreenButton.addEventListener('click', () => {
+  togglePreviewFullscreen().catch(() => {
+    setStatus('Impossible de passer en plein écran.');
+  });
+});
+changeTabButton.addEventListener('click', () => {
+  handleChangeTab();
+});
+
+syncFullscreenButton();
 
 toggleButton.addEventListener('click', () => {
   if (isRunning) {

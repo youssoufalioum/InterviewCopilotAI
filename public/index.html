@@ -11,11 +11,14 @@
       <aside class="left-column card">
         <div class="video-surface">
           <div class="video-toolbar">
-            <button type="button" class="chip">Fullscreen</button>
-            <button type="button" class="chip">Change Tab</button>
+            <button id="fullscreenButton" type="button" class="chip">Fullscreen</button>
+            <button id="changeTabButton" type="button" class="chip">Change Tab</button>
           </div>
           <div class="video-grid">
-            <div class="video-main">Screen / Meeting Preview</div>
+            <div id="previewStage" class="video-main preview-stage">
+              <video id="previewVideo" class="preview-video" autoplay playsinline muted></video>
+              <div id="previewPlaceholder" class="preview-placeholder">Screen / Meeting Preview</div>
+            </div>
             <div class="video-side">Speaker Cam</div>
           </div>
         </div>
