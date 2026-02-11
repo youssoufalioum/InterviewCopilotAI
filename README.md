@@ -18,12 +18,14 @@ Ajoutez votre clé dans `.env` :
 
 ```bash
 GEMINI_API_KEY=your_api_key_here
+# ou GOOGLE_API_KEY=your_api_key_here
 ```
 
 ## Lancement
 
 ```bash
 export GEMINI_API_KEY=your_api_key_here
+# ou GOOGLE_API_KEY=your_api_key_here
 npm start
 ```
 
@@ -33,3 +35,5 @@ Puis ouvrez `http://localhost:3000`.
 ## Stack Gemini
 
 Le backend utilise désormais le SDK officiel `@google/genai` (`import { GoogleGenAI, Modality } from '@google/genai';`) pour établir la session Live et envoyer l'audio PCM temps réel.
+
+La session est initialisée avec l’outil `googleSearch` quand il est supporté par le modèle/session (fallback automatique sans tool si non supporté).
