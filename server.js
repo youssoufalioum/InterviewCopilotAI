@@ -69,30 +69,46 @@ function hasAudioEnergy(base64Audio) {
   return rms > 120;
 }
 
-function buildSessionConfig(channel) {
+function normalizeLanguage(language) {
+  const allowed = new Set(['fr', 'en', 'es', 'de', 'it', 'pt']);
+  const wanted = (language || '').toLowerCase().trim();
+  return allowed.has(wanted) ? wanted : 'en';
+}
+
+function buildSessionConfig(channel, language) {
   const isTranscript = channel === 'candidate' || channel === 'interviewer';
+  const lang = normalizeLanguage(language);
+
+  const languageHint = lang === 'fr' ? 'Français' : lang === 'en' ? 'English' : lang;
 
   return {
     type: 'session.update',
     session: {
-      instructions: isTranscript ? TRANSCRIPT_SYSTEM_INSTRUCTION : ASSISTANT_SYSTEM_INSTRUCTION,
+      instructions: isTranscript
+        ? `${TRANSCRIPT_SYSTEM_INSTRUCTION} La langue prioritaire est: ${languageHint}.`
+        : `${ASSISTANT_SYSTEM_INSTRUCTION} La langue de l'interview est: ${languageHint}.`,
       modalities: ['text'],
       input_audio_format: 'pcm16',
       output_audio_format: 'pcm16',
       input_audio_transcription: {
-        model: 'gpt-4o-mini-transcribe'
+        model: 'gpt-4o-mini-transcribe',
+        language: lang
       },
       turn_detection: {
         type: 'server_vad',
-        threshold: 0.5,
-        prefix_padding_ms: 250,
-        silence_duration_ms: 450
+        threshold: 0.45,
+        prefix_padding_ms: 350,
+        silence_duration_ms: 650
       }
     }
   };
 }
 
 function parseOpenAIEvent(event, state) {
+  if (event.type === 'conversation.item.input_audio_transcription.delta' && event.delta) {
+    return { transcriptDelta: event.delta };
+  }
+
   if (event.type === 'conversation.item.input_audio_transcription.completed' && event.transcript) {
     return { transcript: event.transcript };
   }
@@ -127,7 +143,7 @@ function parseOpenAIEvent(event, state) {
   return null;
 }
 
-function connectOpenAIRealtime(clientSocket, channel) {
+function connectOpenAIRealtime(clientSocket, channel, language) {
   const upstream = new WebSocket('wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview', {
     headers: {
       Authorization: `Bearer ${OPENAI_API_KEY}`,
@@ -140,21 +156,25 @@ function connectOpenAIRealtime(clientSocket, channel) {
     audioSinceLastCommit: false,
     closed: false,
     channel,
+    language: normalizeLanguage(language),
     contextText: ''
   };
 
   const isTranscriptChannel = channel === 'candidate' || channel === 'interviewer';
 
-  const commitAndRespond = (contextOverride = "") => {
-    if (upstream.readyState !== WebSocket.OPEN || !state.audioSinceLastCommit) {
-      if (upstream.readyState === WebSocket.OPEN && !state.audioSinceLastCommit) {
-        sendToClient(clientSocket, { type: 'status', message: 'Aucun audio détecté pour générer une réponse.' });
-      }
+  const commitAndRespond = (contextOverride = '', requestedLanguage = state.language) => {
+    const effectiveLanguage = normalizeLanguage(requestedLanguage);
+    const injectedContext = (contextOverride || state.contextText || '').trim();
+
+    if (upstream.readyState !== WebSocket.OPEN) return;
+
+    if (state.audioSinceLastCommit) {
+      upstream.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
+      state.audioSinceLastCommit = false;
+    } else if (!injectedContext) {
+      sendToClient(clientSocket, { type: 'status', message: 'Aucun audio détecté pour générer une réponse.' });
       return;
     }
-
-    upstream.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
-    const injectedContext = (contextOverride || state.contextText || '').trim();
 
     upstream.send(
       JSON.stringify({
@@ -162,17 +182,19 @@ function connectOpenAIRealtime(clientSocket, channel) {
         response: {
           modalities: ['text'],
           instructions: injectedContext
-            ? `Contexte de transcription récent:\n${injectedContext}\n\nRéponds strictement en te basant sur ce contexte.`
-            : undefined
+            ? `Language=${effectiveLanguage}. Contexte de transcription récent:\n${injectedContext}\n\nRéponds uniquement avec des éléments alignés sur ce contexte.`
+            : `Language=${effectiveLanguage}. Réponds de manière concise.`
         }
       })
     );
-    state.audioSinceLastCommit = false;
   };
 
   upstream.on('open', () => {
-    upstream.send(JSON.stringify(buildSessionConfig(channel)));
-    sendToClient(clientSocket, { type: 'status', message: `Connected to OpenAI Realtime - channel: ${channel}` });
+    upstream.send(JSON.stringify(buildSessionConfig(channel, state.language)));
+    sendToClient(clientSocket, {
+      type: 'status',
+      message: `Connected to OpenAI Realtime - channel: ${channel}, language: ${state.language}`
+    });
   });
 
   upstream.on('message', (raw) => {
@@ -189,6 +211,7 @@ function connectOpenAIRealtime(clientSocket, channel) {
     sendToClient(clientSocket, {
       type: 'ai',
       transcript: parsed.transcript || '',
+      transcriptDelta: parsed.transcriptDelta || '',
       suggestion: parsed.suggestion || '',
       raw: event
     });
@@ -211,8 +234,8 @@ function connectOpenAIRealtime(clientSocket, channel) {
   const transcriptCommitTimer = isTranscriptChannel
     ? setInterval(() => {
         if (upstream.readyState !== WebSocket.OPEN || !state.audioSinceLastCommit) return;
-        commitAndRespond();
-      }, 900)
+        commitAndRespond('', state.language);
+      }, 1100)
     : null;
 
   const close = () => {
@@ -231,13 +254,15 @@ function connectOpenAIRealtime(clientSocket, channel) {
       upstream.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: base64Audio }));
       state.audioSinceLastCommit = true;
     },
-    requestAssistantAnswer(contextText = '') {
+    requestAssistantAnswer(contextText = '', language = state.language) {
       if (isTranscriptChannel) return;
       if (contextText && contextText.trim()) state.contextText = contextText.trim();
-      commitAndRespond(contextText);
+      state.language = normalizeLanguage(language);
+      commitAndRespond(contextText, state.language);
     },
-    setContext(contextText = '') {
+    setContext(contextText = '', language = state.language) {
       state.contextText = (contextText || '').trim();
+      state.language = normalizeLanguage(language);
     },
     close
   };
@@ -251,17 +276,17 @@ wss.on('connection', (clientSocket) => {
   }
 
   let channel = 'assistant';
+  let language = 'en';
   let bridge = null;
 
   const ensureBridge = () => {
     if (!bridge) {
-      bridge = connectOpenAIRealtime(clientSocket, channel);
+      bridge = connectOpenAIRealtime(clientSocket, channel, language);
       sendToClient(clientSocket, { type: 'status', message: `Session OpenAI prête (${channel}), envoi audio...` });
     }
   };
 
-  const resetBridgeForChannel = (wantedChannel) => {
-    channel = wantedChannel;
+  const resetBridge = () => {
     if (bridge) {
       bridge.close();
       bridge = null;
@@ -280,22 +305,31 @@ wss.on('connection', (clientSocket) => {
 
       try {
         const payload = JSON.parse(text);
-        if (payload.type === 'session_config' && typeof payload.channel === 'string') {
-          if (['assistant', 'candidate', 'interviewer'].includes(payload.channel)) {
-            resetBridgeForChannel(payload.channel);
+
+        if (payload.type === 'session_config') {
+          const wantedChannel = payload.channel;
+          const wantedLanguage = normalizeLanguage(payload.language || language);
+          const channelChanged = ['assistant', 'candidate', 'interviewer'].includes(wantedChannel) && wantedChannel !== channel;
+          const languageChanged = wantedLanguage !== language;
+
+          if (channelChanged) channel = wantedChannel;
+          if (languageChanged) language = wantedLanguage;
+
+          if (channelChanged || languageChanged) {
+            resetBridge();
           }
           return;
         }
 
         if (payload.type === 'assistant_context') {
           ensureBridge();
-          bridge.setContext(payload.context || '');
+          bridge.setContext(payload.context || '', payload.language || language);
           return;
         }
 
         if (payload.type === 'assistant_answer') {
           ensureBridge();
-          bridge.requestAssistantAnswer(payload.context || '');
+          bridge.requestAssistantAnswer(payload.context || '', payload.language || language);
           return;
         }
       } catch {

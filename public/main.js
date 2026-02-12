@@ -8,8 +8,11 @@ const previewPlaceholder = document.getElementById('previewPlaceholder');
 const fullscreenButton = document.getElementById('fullscreenButton');
 const changeTabButton = document.getElementById('changeTabButton');
 const connectTranscriptButton = document.getElementById('connectTranscriptButton');
+const toggleMicrophoneButton = document.getElementById('toggleMicrophoneButton');
 const clearTranscriptButton = document.getElementById('clearTranscriptButton');
 const aiAnswerButton = document.getElementById('aiAnswerButton');
+const languageSelect = document.getElementById('languageSelect');
+const timerPill = document.getElementById('timerPill');
 
 let socket;
 let audioContext;
@@ -22,29 +25,62 @@ let systemSource;
 let micGainNode;
 let systemGainNode;
 let sendInterval;
+let timerInterval;
+let startTimestampMs = 0;
+
 let isRunning = false;
 let isTranscriptConnected = false;
+let isMicrophoneEnabled = true;
 
 let pendingPCM = new Int16Array(0);
 
 const TARGET_SAMPLE_RATE = 16000;
 const CHUNK_DURATION_MS = 150;
+const MAX_HISTORY_MESSAGES = 18;
 
 const transcriptChannels = {
   candidate: null,
   interviewer: null
 };
 
+const transcriptDrafts = {
+  candidate: null,
+  interviewer: null
+};
+
+const transcriptHistory = [];
+
 const lastTranscriptText = {
   candidate: '',
   interviewer: ''
 };
 
-const transcriptHistory = [];
-const MAX_HISTORY_MESSAGES = 14;
-
 function setStatus(message) {
   statusLabel.textContent = message;
+}
+
+function formatElapsed(ms) {
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
+  const minutes = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
+  const seconds = String(totalSeconds % 60).padStart(2, '0');
+  return `${hours}:${minutes}:${seconds}`;
+}
+
+function startTimer() {
+  if (timerInterval) return;
+  startTimestampMs = Date.now();
+  timerInterval = setInterval(() => {
+    timerPill.textContent = `⏱ ${formatElapsed(Date.now() - startTimestampMs)}`;
+  }, 1000);
+}
+
+function stopTimer() {
+  if (timerInterval) {
+    clearInterval(timerInterval);
+    timerInterval = null;
+  }
+  timerPill.textContent = '⏱ 00:00:00';
 }
 
 function appendLine(target, text) {
@@ -55,32 +91,25 @@ function appendLine(target, text) {
 
 function formatPermissionError(error) {
   if (!error) return 'Permission audio refusée.';
-
   if (error.name === 'NotAllowedError') {
     return "Permission audio refusée. Autorise le micro ET le partage d'écran avec audio système, puis relance l'assistant.";
   }
-
   if (error.name === 'NotFoundError') {
     return 'Aucune source audio trouvée (micro ou audio système indisponible).';
   }
-
   if (error.name === 'NotReadableError') {
     return 'La source audio est déjà utilisée par une autre application.';
   }
-
   return `Impossible de démarrer: ${error.message}`;
 }
 
 function downsampleTo16kHz(float32Buffer, sourceSampleRate) {
-  if (sourceSampleRate === TARGET_SAMPLE_RATE) {
-    return float32Buffer;
-  }
+  if (sourceSampleRate === TARGET_SAMPLE_RATE) return float32Buffer;
 
   const ratio = sourceSampleRate / TARGET_SAMPLE_RATE;
   const newLength = Math.max(1, Math.round(float32Buffer.length / ratio));
   const result = new Float32Array(newLength);
 
-  // Rééchantillonnage par moyennage de fenêtres: simple et très rapide, idéal pour faible latence.
   let resultOffset = 0;
   let sourceOffset = 0;
 
@@ -120,42 +149,6 @@ function concatInt16(existing, incoming) {
   return merged;
 }
 
-function createChatMessage(role, text) {
-  const row = document.createElement('div');
-  row.className = `msg-row ${role === 'candidate' ? 'msg-right' : 'msg-left'}`;
-
-  const bubble = document.createElement('div');
-  bubble.className = `msg-bubble ${role === 'candidate' ? 'candidate' : 'interviewer'}`;
-  bubble.textContent = text;
-
-  const meta = document.createElement('div');
-  meta.className = 'msg-meta';
-  meta.textContent = role === 'candidate' ? 'Candidat' : 'Interviewer';
-
-  row.appendChild(bubble);
-  row.appendChild(meta);
-  transcriptBox.appendChild(row);
-  transcriptBox.scrollTop = transcriptBox.scrollHeight;
-}
-
-function appendTranscriptMessage(role, text) {
-  const normalized = (text || '').trim();
-  if (!normalized) return;
-  if (lastTranscriptText[role] === normalized) return;
-
-  lastTranscriptText[role] = normalized;
-  createChatMessage(role, normalized);
-  pushTranscriptHistory(role, normalized);
-  syncAssistantContext();
-}
-
-function buildTranscriptContext() {
-  return transcriptHistory
-    .slice(-MAX_HISTORY_MESSAGES)
-    .map((entry) => `${entry.role === 'candidate' ? 'Candidat' : 'Interviewer'}: ${entry.text}`)
-    .join('\n');
-}
-
 function pushTranscriptHistory(role, text) {
   transcriptHistory.push({ role, text });
   if (transcriptHistory.length > MAX_HISTORY_MESSAGES) {
@@ -163,9 +156,117 @@ function pushTranscriptHistory(role, text) {
   }
 }
 
+function buildTranscriptContext() {
+  return transcriptHistory
+    .slice(-MAX_HISTORY_MESSAGES)
+    .map((entry) => `${entry.role === 'candidate' ? 'Candidate' : 'Interviewer'}: ${entry.text}`)
+    .join('\n');
+}
+
 function syncAssistantContext() {
   if (!socket || socket.readyState !== WebSocket.OPEN) return;
-  socket.send(JSON.stringify({ type: 'assistant_context', context: buildTranscriptContext() }));
+  socket.send(
+    JSON.stringify({
+      type: 'assistant_context',
+      context: buildTranscriptContext(),
+      language: languageSelect.value
+    })
+  );
+}
+
+function createTranscriptBubble(role) {
+  const row = document.createElement('div');
+  row.className = `msg-row ${role === 'candidate' ? 'msg-right' : 'msg-left'}`;
+
+  const bubble = document.createElement('div');
+  bubble.className = `msg-bubble ${role === 'candidate' ? 'candidate' : 'interviewer'}`;
+
+  const meta = document.createElement('div');
+  meta.className = 'msg-meta';
+  meta.textContent = role === 'candidate' ? 'Candidat (stream...)' : 'Interviewer (stream...)';
+
+  row.appendChild(bubble);
+  row.appendChild(meta);
+  transcriptBox.appendChild(row);
+  transcriptBox.scrollTop = transcriptBox.scrollHeight;
+
+  return { row, bubble, meta, text: '', queue: '', timer: null, finalizeTimer: null, role };
+}
+
+function finalizeDraft(role) {
+  const draft = transcriptDrafts[role];
+  if (!draft) return;
+
+  if (draft.timer) {
+    clearInterval(draft.timer);
+    draft.timer = null;
+  }
+
+  if (draft.finalizeTimer) {
+    clearTimeout(draft.finalizeTimer);
+    draft.finalizeTimer = null;
+  }
+
+  const normalized = draft.text.trim();
+  if (!normalized) {
+    draft.row.remove();
+    transcriptDrafts[role] = null;
+    return;
+  }
+
+  if (lastTranscriptText[role] === normalized) {
+    draft.row.remove();
+    transcriptDrafts[role] = null;
+    return;
+  }
+
+  lastTranscriptText[role] = normalized;
+  draft.meta.textContent = role === 'candidate' ? 'Candidat' : 'Interviewer';
+  pushTranscriptHistory(role, normalized);
+  syncAssistantContext();
+  transcriptDrafts[role] = null;
+}
+
+function ensureDraftTicker(role) {
+  const draft = transcriptDrafts[role];
+  if (!draft || draft.timer) return;
+
+  draft.timer = setInterval(() => {
+    if (!draft.queue.length) {
+      clearInterval(draft.timer);
+      draft.timer = null;
+      return;
+    }
+
+    draft.text += draft.queue.slice(0, 1);
+    draft.queue = draft.queue.slice(1);
+    draft.bubble.textContent = draft.text;
+    transcriptBox.scrollTop = transcriptBox.scrollHeight;
+  }, 18);
+}
+
+function appendTranscriptStream(role, text) {
+  const normalized = (text || '').trim();
+  if (!normalized) return;
+
+  if (!transcriptDrafts[role]) {
+    transcriptDrafts[role] = createTranscriptBubble(role);
+  }
+
+  const draft = transcriptDrafts[role];
+  const separator = draft.text.length > 0 || draft.queue.length > 0 ? ' ' : '';
+  draft.queue += `${separator}${normalized}`;
+
+  if (draft.finalizeTimer) {
+    clearTimeout(draft.finalizeTimer);
+  }
+  draft.finalizeTimer = setTimeout(() => finalizeDraft(role), 900);
+  ensureDraftTicker(role);
+}
+
+function clearAllDrafts() {
+  finalizeDraft('candidate');
+  finalizeDraft('interviewer');
 }
 
 function sendPendingChunk() {
@@ -177,8 +278,6 @@ function sendPendingChunk() {
   while (pendingPCM.length >= targetSamples) {
     const chunk = pendingPCM.slice(0, targetSamples);
     pendingPCM = pendingPCM.slice(targetSamples);
-
-    // Envoi binaire brut (PCM16 LE mono 16kHz) pour minimiser l'overhead côté client.
     socket.send(chunk.buffer);
   }
 }
@@ -197,13 +296,14 @@ async function attachPreviewStream(stream) {
   try {
     await previewVideo.play();
   } catch {
-    // Ignore autoplay errors; user interaction on the page usually unlocks play.
+    // autoplay may be blocked
   }
 
   videoTracks[0].addEventListener('ended', () => {
     previewVideo.srcObject = null;
     previewPlaceholder.hidden = false;
 
+    if (isRunning) stopTimer();
     if (isTranscriptConnected) {
       disconnectTranscriptChannels();
       setStatus("Le partage d'écran s'est arrêté.");
@@ -287,8 +387,7 @@ async function handleChangeTab() {
     await replaceSystemStream(newStream);
     setStatus('Nouvel onglet partagé.');
   } catch (error) {
-    const message = formatPermissionError(error);
-    setStatus(message);
+    setStatus(formatPermissionError(error));
   }
 }
 
@@ -297,7 +396,6 @@ async function togglePreviewFullscreen() {
     await document.exitFullscreen();
     return;
   }
-
   await previewStage.requestFullscreen();
 }
 
@@ -308,49 +406,42 @@ function syncFullscreenButton() {
 
 function closeSocketSafe(ws) {
   if (!ws) return;
-  if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-    ws.close();
-  }
+  if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close();
 }
 
-function stopChannel(channel) {
+async function stopChannel(channel) {
   if (!channel) return;
 
-  if (channel.sendInterval) {
-    clearInterval(channel.sendInterval);
-  }
-
+  if (channel.sendInterval) clearInterval(channel.sendInterval);
   if (channel.workletNode) {
     channel.workletNode.port.onmessage = null;
     channel.workletNode.disconnect();
   }
-
-  if (channel.sourceNode) {
-    channel.sourceNode.disconnect();
-  }
-
-  if (channel.audioContext) {
-    channel.audioContext.close();
-  }
+  if (channel.sourceNode) channel.sourceNode.disconnect();
+  if (channel.audioContext) await channel.audioContext.close();
 
   closeSocketSafe(channel.socket);
 }
 
-function disconnectTranscriptChannels() {
-  stopChannel(transcriptChannels.candidate);
-  stopChannel(transcriptChannels.interviewer);
-
+async function disconnectTranscriptChannels() {
+  await Promise.all([stopChannel(transcriptChannels.candidate), stopChannel(transcriptChannels.interviewer)]);
   transcriptChannels.candidate = null;
   transcriptChannels.interviewer = null;
   isTranscriptConnected = false;
   connectTranscriptButton.textContent = 'Connect';
+  clearAllDrafts();
+}
+
+function createStreamFromTrack(track) {
+  const stream = new MediaStream();
+  if (track) stream.addTrack(track);
+  return stream;
 }
 
 async function createTranscriptChannel(role, stream) {
-  const socketUrl = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`;
   const channel = {
     role,
-    socket: new WebSocket(socketUrl),
+    socket: new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`),
     audioContext: null,
     sourceNode: null,
     workletNode: null,
@@ -370,14 +461,18 @@ async function createTranscriptChannel(role, stream) {
       return;
     }
 
+    if ((payload.type === 'ai' || payload.type === 'gemini') && payload.transcriptDelta) {
+      appendTranscriptStream(role, payload.transcriptDelta);
+    }
+
     if ((payload.type === 'ai' || payload.type === 'gemini') && payload.transcript) {
-      appendTranscriptMessage(role, payload.transcript);
+      appendTranscriptStream(role, payload.transcript);
     }
   };
 
   await new Promise((resolve, reject) => {
     channel.socket.onopen = () => {
-      channel.socket.send(JSON.stringify({ type: 'session_config', channel: role }));
+      channel.socket.send(JSON.stringify({ type: 'session_config', channel: role, language: languageSelect.value }));
       resolve();
     };
     channel.socket.onerror = () => reject(new Error(`WebSocket ${role} indisponible`));
@@ -420,11 +515,19 @@ async function createTranscriptChannel(role, stream) {
 async function connectTranscriptChannels() {
   await ensureMediaStreams();
 
-  const micOnlyStream = new MediaStream([microphoneStream.getAudioTracks()[0]]);
-  const systemAudioStream = new MediaStream(systemStream.getAudioTracks());
+  const systemTrack = systemStream.getAudioTracks()[0];
+  if (!systemTrack) {
+    throw new Error("L'onglet partagé ne fournit pas de piste audio. Active 'Partager l'audio de l'onglet'.");
+  }
 
-  transcriptChannels.candidate = await createTranscriptChannel('candidate', micOnlyStream);
-  transcriptChannels.interviewer = await createTranscriptChannel('interviewer', systemAudioStream);
+  transcriptChannels.interviewer = await createTranscriptChannel('interviewer', createStreamFromTrack(systemTrack));
+
+  if (isMicrophoneEnabled) {
+    const micTrack = microphoneStream?.getAudioTracks?.()[0];
+    if (micTrack) {
+      transcriptChannels.candidate = await createTranscriptChannel('candidate', createStreamFromTrack(micTrack));
+    }
+  }
 
   isTranscriptConnected = true;
   connectTranscriptButton.textContent = 'Disconnect';
@@ -445,9 +548,11 @@ async function startAssistant() {
     socket.binaryType = 'arraybuffer';
 
     socket.onopen = () => {
-      socket.send(JSON.stringify({ type: 'session_config', channel: 'assistant' }));
+      socket.send(JSON.stringify({ type: 'session_config', channel: 'assistant', language: languageSelect.value }));
+      syncAssistantContext();
       setStatus('Connexion websocket établie.');
     };
+
     socket.onerror = () => setStatus('Erreur WebSocket.');
     socket.onclose = () => setStatus('WebSocket fermé.');
 
@@ -458,18 +563,11 @@ async function startAssistant() {
       try {
         payload = JSON.parse(event.data);
       } catch {
-        appendLine(suggestionBox, event.data);
         return;
       }
 
-      if (payload.type === 'status') {
-        setStatus(payload.message);
-      }
-
-      if (payload.type === 'error') {
-        setStatus(payload.message);
-      }
-
+      if (payload.type === 'status') setStatus(payload.message);
+      if (payload.type === 'error') setStatus(payload.message);
       if ((payload.type === 'ai' || payload.type === 'gemini') && payload.suggestion) {
         appendLine(suggestionBox, payload.suggestion);
       }
@@ -490,7 +588,6 @@ async function startAssistant() {
 
     micSource.connect(micGainNode);
     systemSource.connect(systemGainNode);
-
     micGainNode.connect(mixedNode);
     systemGainNode.connect(mixedNode);
 
@@ -505,11 +602,6 @@ async function startAssistant() {
 
     workletNode.port.onmessage = (event) => {
       const sourceChunk = new Float32Array(event.data);
-
-      // Pipeline faible latence:
-      // 1) mixage en mono dans l'AudioWorklet
-      // 2) rééchantillonnage rapide vers 16kHz
-      // 3) conversion PCM16 puis bufferisation par paquets ~150ms
       const downsampled = downsampleTo16kHz(sourceChunk, audioContext.sampleRate);
       const pcm16 = floatToPCM16(downsampled);
       pendingPCM = concatInt16(pendingPCM, pcm16);
@@ -517,10 +609,10 @@ async function startAssistant() {
 
     sendInterval = setInterval(sendPendingChunk, 50);
 
-    setStatus('Assistant actif. Suggestions OpenAI Realtime en temps réel...');
+    startTimer();
+    setStatus('Assistant actif. En attente du clic AI Answer.');
   } catch (error) {
     const userMessage = formatPermissionError(error);
-    console.warn('[audio-start-error]', error);
     setStatus(userMessage);
     appendLine(suggestionBox, `⚠️ ${userMessage}`);
     await stopAssistant({ keepStatus: true });
@@ -533,6 +625,8 @@ async function stopAssistant(options = {}) {
 
   toggleButton.textContent = "Démarrer l'Assistant";
   toggleButton.classList.remove('is-running');
+
+  stopTimer();
 
   if (sendInterval) {
     clearInterval(sendInterval);
@@ -579,13 +673,11 @@ async function stopAssistant(options = {}) {
   socket = null;
   pendingPCM = new Int16Array(0);
 
-  if (!options.keepStatus) {
-    setStatus('Assistant arrêté.');
-  }
+  if (!options.keepStatus) setStatus('Assistant arrêté.');
 }
 
 async function stopAllStreamsAndTranscriptions() {
-  disconnectTranscriptChannels();
+  await disconnectTranscriptChannels();
 
   if (microphoneStream) {
     microphoneStream.getTracks().forEach((track) => track.stop());
@@ -604,20 +696,37 @@ async function stopAllStreamsAndTranscriptions() {
   }
 }
 
+function updateMicButtonLabel() {
+  toggleMicrophoneButton.textContent = isMicrophoneEnabled ? 'Désactiver micro' : 'Activer micro';
+}
+
 document.addEventListener('fullscreenchange', syncFullscreenButton);
+
 fullscreenButton.addEventListener('click', () => {
-  togglePreviewFullscreen().catch(() => {
-    setStatus('Impossible de passer en plein écran.');
-  });
+  togglePreviewFullscreen().catch(() => setStatus('Impossible de passer en plein écran.'));
 });
 
 changeTabButton.addEventListener('click', () => {
   handleChangeTab();
 });
 
+languageSelect.addEventListener('change', async () => {
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({ type: 'session_config', channel: 'assistant', language: languageSelect.value }));
+    syncAssistantContext();
+  }
+
+  if (isTranscriptConnected) {
+    await disconnectTranscriptChannels();
+    await connectTranscriptChannels();
+  }
+
+  setStatus(`Langue de l'interview: ${languageSelect.options[languageSelect.selectedIndex].text}`);
+});
+
 connectTranscriptButton.addEventListener('click', async () => {
   if (isTranscriptConnected) {
-    disconnectTranscriptChannels();
+    await disconnectTranscriptChannels();
     setStatus('Transcription déconnectée.');
     return;
   }
@@ -625,20 +734,29 @@ connectTranscriptButton.addEventListener('click', async () => {
   try {
     await connectTranscriptChannels();
   } catch (error) {
-    disconnectTranscriptChannels();
+    await disconnectTranscriptChannels();
     setStatus(formatPermissionError(error));
+  }
+});
+
+toggleMicrophoneButton.addEventListener('click', async () => {
+  isMicrophoneEnabled = !isMicrophoneEnabled;
+  updateMicButtonLabel();
+
+  if (isTranscriptConnected) {
+    await disconnectTranscriptChannels();
+    await connectTranscriptChannels();
   }
 });
 
 clearTranscriptButton.addEventListener('click', () => {
   transcriptBox.innerHTML = '';
   suggestionBox.textContent = '';
+  transcriptHistory.length = 0;
   lastTranscriptText.candidate = '';
   lastTranscriptText.interviewer = '';
-  transcriptHistory.length = 0;
   setStatus('Conversation nettoyée.');
 });
-
 
 aiAnswerButton.addEventListener('click', () => {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
@@ -646,22 +764,19 @@ aiAnswerButton.addEventListener('click', () => {
     return;
   }
 
-  socket.send(JSON.stringify({ type: 'assistant_answer', context: buildTranscriptContext() }));
+  const context = buildTranscriptContext();
+  socket.send(JSON.stringify({ type: 'assistant_answer', context, language: languageSelect.value }));
   setStatus('Demande de réponse IA envoyée...');
 });
-
-syncFullscreenButton();
 
 toggleButton.addEventListener('click', async () => {
   if (isRunning) {
     await stopAssistant();
-
-    // Si la transcription n'est pas connectée, on libère complètement les streams.
-    if (!isTranscriptConnected) {
-      await stopAllStreamsAndTranscriptions();
-    }
+    if (!isTranscriptConnected) await stopAllStreamsAndTranscriptions();
     return;
   }
-
-  startAssistant();
+  await startAssistant();
 });
+
+syncFullscreenButton();
+updateMicButtonLabel();

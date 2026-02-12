@@ -28,6 +28,7 @@
             <h2>Transcript</h2>
             <div class="head-actions">
               <button id="connectTranscriptButton" type="button" class="ghost-button">Connect</button>
+              <button id="toggleMicrophoneButton" type="button" class="ghost-button">Désactiver micro</button>
               <button id="clearTranscriptButton" type="button" class="ghost-button">Clear</button>
             </div>
           </div>
@@ -46,7 +47,15 @@
           </div>
 
           <div class="assistant-controls">
-            <span class="timer-pill">⚙ 7 mins (Free)</span>
+            <select id="languageSelect" class="lang-select" aria-label="Langue de l'interview">
+              <option value="fr">Français</option>
+              <option value="en" selected>English</option>
+              <option value="es">Español</option>
+              <option value="de">Deutsch</option>
+              <option value="it">Italiano</option>
+              <option value="pt">Português</option>
+            </select>
+            <span id="timerPill" class="timer-pill">⏱ 00:00:00</span>
             <button id="toggleAssistant" class="assistant-toggle" type="button">Démarrer l'Assistant</button>
           </div>
         </header>
