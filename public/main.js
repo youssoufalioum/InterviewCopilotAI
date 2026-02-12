@@ -40,6 +40,9 @@ const lastTranscriptText = {
   interviewer: ''
 };
 
+const transcriptHistory = [];
+const MAX_HISTORY_MESSAGES = 14;
+
 function setStatus(message) {
   statusLabel.textContent = message;
 }
@@ -142,6 +145,27 @@ function appendTranscriptMessage(role, text) {
 
   lastTranscriptText[role] = normalized;
   createChatMessage(role, normalized);
+  pushTranscriptHistory(role, normalized);
+  syncAssistantContext();
+}
+
+function buildTranscriptContext() {
+  return transcriptHistory
+    .slice(-MAX_HISTORY_MESSAGES)
+    .map((entry) => `${entry.role === 'candidate' ? 'Candidat' : 'Interviewer'}: ${entry.text}`)
+    .join('\n');
+}
+
+function pushTranscriptHistory(role, text) {
+  transcriptHistory.push({ role, text });
+  if (transcriptHistory.length > MAX_HISTORY_MESSAGES) {
+    transcriptHistory.splice(0, transcriptHistory.length - MAX_HISTORY_MESSAGES);
+  }
+}
+
+function syncAssistantContext() {
+  if (!socket || socket.readyState !== WebSocket.OPEN) return;
+  socket.send(JSON.stringify({ type: 'assistant_context', context: buildTranscriptContext() }));
 }
 
 function sendPendingChunk() {
@@ -611,6 +635,7 @@ clearTranscriptButton.addEventListener('click', () => {
   suggestionBox.textContent = '';
   lastTranscriptText.candidate = '';
   lastTranscriptText.interviewer = '';
+  transcriptHistory.length = 0;
   setStatus('Conversation nettoyée.');
 });
 
@@ -621,7 +646,7 @@ aiAnswerButton.addEventListener('click', () => {
     return;
   }
 
-  socket.send(JSON.stringify({ type: 'assistant_answer' }));
+  socket.send(JSON.stringify({ type: 'assistant_answer', context: buildTranscriptContext() }));
   setStatus('Demande de réponse IA envoyée...');
 });
 

@@ -66,7 +66,7 @@ function hasAudioEnergy(base64Audio) {
   }
 
   const rms = Math.sqrt(sumSquares / sampleCount);
-  return rms > 450;
+  return rms > 120;
 }
 
 function buildSessionConfig(channel) {
@@ -139,12 +139,13 @@ function connectOpenAIRealtime(clientSocket, channel) {
     pendingSuggestion: '',
     audioSinceLastCommit: false,
     closed: false,
-    channel
+    channel,
+    contextText: ''
   };
 
   const isTranscriptChannel = channel === 'candidate' || channel === 'interviewer';
 
-  const commitAndRespond = () => {
+  const commitAndRespond = (contextOverride = "") => {
     if (upstream.readyState !== WebSocket.OPEN || !state.audioSinceLastCommit) {
       if (upstream.readyState === WebSocket.OPEN && !state.audioSinceLastCommit) {
         sendToClient(clientSocket, { type: 'status', message: 'Aucun audio détecté pour générer une réponse.' });
@@ -153,11 +154,16 @@ function connectOpenAIRealtime(clientSocket, channel) {
     }
 
     upstream.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
+    const injectedContext = (contextOverride || state.contextText || '').trim();
+
     upstream.send(
       JSON.stringify({
         type: 'response.create',
         response: {
-          modalities: ['text']
+          modalities: ['text'],
+          instructions: injectedContext
+            ? `Contexte de transcription récent:\n${injectedContext}\n\nRéponds strictement en te basant sur ce contexte.`
+            : undefined
         }
       })
     );
@@ -225,9 +231,13 @@ function connectOpenAIRealtime(clientSocket, channel) {
       upstream.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: base64Audio }));
       state.audioSinceLastCommit = true;
     },
-    requestAssistantAnswer() {
+    requestAssistantAnswer(contextText = '') {
       if (isTranscriptChannel) return;
-      commitAndRespond();
+      if (contextText && contextText.trim()) state.contextText = contextText.trim();
+      commitAndRespond(contextText);
+    },
+    setContext(contextText = '') {
+      state.contextText = (contextText || '').trim();
     },
     close
   };
@@ -277,9 +287,15 @@ wss.on('connection', (clientSocket) => {
           return;
         }
 
+        if (payload.type === 'assistant_context') {
+          ensureBridge();
+          bridge.setContext(payload.context || '');
+          return;
+        }
+
         if (payload.type === 'assistant_answer') {
           ensureBridge();
-          bridge.requestAssistantAnswer();
+          bridge.requestAssistantAnswer(payload.context || '');
           return;
         }
       } catch {
