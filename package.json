@@ -1,0 +1,16 @@
+{
+  "name": "interview-copilot-ai",
+  "version": "1.0.0",
+  "description": "Low-latency Interview Copilot using OpenAI Realtime API",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.18.0",
+    "openai": "^4.103.0"
+  },
+  "type": "module"
+}
