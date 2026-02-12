@@ -38,6 +38,9 @@ const TARGET_SAMPLE_RATE = 16000;
 const CHUNK_DURATION_MS = 150;
 const MAX_HISTORY_MESSAGES = 18;
 
+let aiQuestionCounter = 0;
+let currentAnswerBody = null;
+
 const transcriptChannels = {
   candidate: null,
   interviewer: null
@@ -87,6 +90,65 @@ function appendLine(target, text) {
   if (!text) return;
   target.textContent += `${text}\n`;
   target.scrollTop = target.scrollHeight;
+}
+
+function escapeHtml(text) {
+  return text
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+}
+
+function markdownToHtml(markdown) {
+  let html = escapeHtml(markdown || '');
+
+  html = html.replace(/^###\s+(.+)$/gm, '<h5>$1</h5>');
+  html = html.replace(/^##\s+(.+)$/gm, '<h4>$1</h4>');
+  html = html.replace(/^#\s+(.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  html = html.replace(/^-\s+(.+)$/gm, '<li>$1</li>');
+  html = html.replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>');
+  html = html.replace(/\n\n+/g, '</p><p>');
+  html = `<p>${html}</p>`;
+  html = html.replace(/<p>\s*<\/p>/g, '');
+  html = html.replace(/\n/g, '<br />');
+
+  return html;
+}
+
+function createAiQuestionBlock(questionNumber) {
+  const block = document.createElement('section');
+  block.className = 'qa-block';
+
+  const title = document.createElement('h4');
+  title.className = 'qa-title';
+  title.textContent = `Question ${questionNumber}`;
+
+  const body = document.createElement('div');
+  body.className = 'qa-body';
+
+  block.appendChild(title);
+  block.appendChild(body);
+  suggestionBox.appendChild(block);
+  suggestionBox.scrollTop = suggestionBox.scrollHeight;
+
+  return body;
+}
+
+function appendAiSuggestion(markdownText) {
+  if (!markdownText || !markdownText.trim()) return;
+
+  if (!currentAnswerBody) {
+    aiQuestionCounter += 1;
+    currentAnswerBody = createAiQuestionBlock(aiQuestionCounter);
+  }
+
+  const existingText = currentAnswerBody.dataset.raw || '';
+  const merged = `${existingText}${existingText ? '\n\n' : ''}${markdownText.trim()}`;
+  currentAnswerBody.dataset.raw = merged;
+  currentAnswerBody.innerHTML = markdownToHtml(merged);
+  suggestionBox.scrollTop = suggestionBox.scrollHeight;
 }
 
 function formatPermissionError(error) {
@@ -569,7 +631,7 @@ async function startAssistant() {
       if (payload.type === 'status') setStatus(payload.message);
       if (payload.type === 'error') setStatus(payload.message);
       if ((payload.type === 'ai' || payload.type === 'gemini') && payload.suggestion) {
-        appendLine(suggestionBox, payload.suggestion);
+        appendAiSuggestion(payload.suggestion);
       }
     };
 
@@ -752,6 +814,8 @@ toggleMicrophoneButton.addEventListener('click', async () => {
 clearTranscriptButton.addEventListener('click', () => {
   transcriptBox.innerHTML = '';
   suggestionBox.textContent = '';
+  aiQuestionCounter = 0;
+  currentAnswerBody = null;
   transcriptHistory.length = 0;
   lastTranscriptText.candidate = '';
   lastTranscriptText.interviewer = '';
@@ -765,8 +829,10 @@ aiAnswerButton.addEventListener('click', () => {
   }
 
   const context = buildTranscriptContext();
+  aiQuestionCounter += 1;
+  currentAnswerBody = createAiQuestionBlock(aiQuestionCounter);
   socket.send(JSON.stringify({ type: 'assistant_answer', context, language: languageSelect.value }));
-  setStatus('Demande de réponse IA envoyée...');
+  setStatus(`Demande de réponse IA envoyée pour Question ${aiQuestionCounter}...`);
 });
 
 toggleButton.addEventListener('click', async () => {

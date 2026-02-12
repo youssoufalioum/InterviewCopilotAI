@@ -361,3 +361,43 @@ body {
   color: #6b7280;
   padding: 0 6px;
 }
+
+.qa-block {
+  border: 1px solid #d6dfec;
+  border-radius: 12px;
+  background: #f5f8ff;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+
+.qa-title {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+  color: #1e3a8a;
+}
+
+.qa-body {
+  color: #1f2937;
+}
+
+.qa-body h3,
+.qa-body h4,
+.qa-body h5 {
+  margin: 10px 0 6px;
+}
+
+.qa-body p {
+  margin: 6px 0;
+}
+
+.qa-body ul {
+  margin: 6px 0 6px 18px;
+  padding: 0;
+}
+
+.qa-body code {
+  background: #e2e8f0;
+  border-radius: 5px;
+  padding: 1px 4px;
+  font-size: 0.87em;
+}

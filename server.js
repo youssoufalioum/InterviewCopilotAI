@@ -75,24 +75,29 @@ function normalizeLanguage(language) {
   return allowed.has(wanted) ? wanted : 'en';
 }
 
+function languageLabel(lang) {
+  const labels = { fr: 'French', en: 'English', es: 'Spanish', de: 'German', it: 'Italian', pt: 'Portuguese' };
+  return labels[lang] || 'English';
+}
+
 function buildSessionConfig(channel, language) {
   const isTranscript = channel === 'candidate' || channel === 'interviewer';
   const lang = normalizeLanguage(language);
-
-  const languageHint = lang === 'fr' ? 'Français' : lang === 'en' ? 'English' : lang;
+  const languageHint = languageLabel(lang);
 
   return {
     type: 'session.update',
     session: {
       instructions: isTranscript
-        ? `${TRANSCRIPT_SYSTEM_INSTRUCTION} La langue prioritaire est: ${languageHint}.`
-        : `${ASSISTANT_SYSTEM_INSTRUCTION} La langue de l'interview est: ${languageHint}.`,
+        ? `${TRANSCRIPT_SYSTEM_INSTRUCTION} The spoken language is ${languageHint}. Do not translate.`
+        : `${ASSISTANT_SYSTEM_INSTRUCTION} The interview language is ${languageHint}.`,
       modalities: ['text'],
       input_audio_format: 'pcm16',
       output_audio_format: 'pcm16',
       input_audio_transcription: {
         model: 'gpt-4o-mini-transcribe',
-        language: lang
+        language: lang,
+        prompt: `Primary spoken language: ${languageHint}.`
       },
       turn_detection: {
         type: 'server_vad',
@@ -104,7 +109,7 @@ function buildSessionConfig(channel, language) {
   };
 }
 
-function parseOpenAIEvent(event, state) {
+function parseOpenAIEvent(event, state, isTranscriptChannel) {
   if (event.type === 'conversation.item.input_audio_transcription.delta' && event.delta) {
     return { transcriptDelta: event.delta };
   }
@@ -113,9 +118,9 @@ function parseOpenAIEvent(event, state) {
     return { transcript: event.transcript };
   }
 
-  const nestedTranscripts = extractStringsByKey(event, 'transcript');
-  if (nestedTranscripts.length > 0) {
-    return { transcript: nestedTranscripts.join('\n') };
+  if (isTranscriptChannel) {
+    // On transcript channels, ignore model-generated text outputs to avoid noisy/hallucinated chunks.
+    return null;
   }
 
   if (event.type === 'response.output_text.delta' && event.delta) {
@@ -176,13 +181,15 @@ function connectOpenAIRealtime(clientSocket, channel, language) {
       return;
     }
 
+    if (isTranscriptChannel) return;
+
     upstream.send(
       JSON.stringify({
         type: 'response.create',
         response: {
           modalities: ['text'],
           instructions: injectedContext
-            ? `Language=${effectiveLanguage}. Contexte de transcription récent:\n${injectedContext}\n\nRéponds uniquement avec des éléments alignés sur ce contexte.`
+            ? `Language=${effectiveLanguage}. Transcript context:\n${injectedContext}\n\nAnswer only from this context and do not invent.`
             : `Language=${effectiveLanguage}. Réponds de manière concise.`
         }
       })
@@ -205,7 +212,7 @@ function connectOpenAIRealtime(clientSocket, channel, language) {
       return;
     }
 
-    const parsed = parseOpenAIEvent(event, state);
+    const parsed = parseOpenAIEvent(event, state, isTranscriptChannel);
     if (!parsed) return;
 
     sendToClient(clientSocket, {
