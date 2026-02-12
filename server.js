@@ -80,6 +80,25 @@ function languageLabel(lang) {
   return labels[lang] || 'English';
 }
 
+function hasQuestionInContext(context, language) {
+  const normalized = (context || '').toLowerCase();
+  if (!normalized.trim()) return false;
+  if (normalized.includes('?')) return true;
+
+  const cues = {
+    fr: new RegExp('\\b(pourquoi|comment|quand|quel|quelle|quels|quelles|est-ce que|peux-tu|pouvez-vous|tu peux|vous pouvez)\\b'),
+    en: new RegExp('\\b(why|how|when|what|which|who|where|can you|could you|would you|do you|did you|are you)\\b'),
+    es: new RegExp('\\b(por qué|como|cuándo|qué|cuál|puedes|podrías)\\b'),
+    de: new RegExp('\\b(warum|wie|wann|was|welche|kannst du|können sie)\\b'),
+    it: new RegExp('\\b(perché|come|quando|che|quale|puoi|potresti)\\b'),
+    pt: new RegExp('\\b(por que|como|quando|o que|qual|você pode|pode)\\b')
+  };
+
+  const re = cues[normalizeLanguage(language)] || cues.en;
+  return re.test(normalized);
+}
+
+
 function buildSessionConfig(channel, language) {
   const isTranscript = channel === 'candidate' || channel === 'interviewer';
   const lang = normalizeLanguage(language);
@@ -265,6 +284,12 @@ function connectOpenAIRealtime(clientSocket, channel, language) {
       if (isTranscriptChannel) return;
       if (contextText && contextText.trim()) state.contextText = contextText.trim();
       state.language = normalizeLanguage(language);
+
+      if (!hasQuestionInContext(state.contextText, state.language)) {
+        sendToClient(clientSocket, { type: 'status', message: 'Aucune question détectée dans la transcription.' });
+        return;
+      }
+
       commitAndRespond(contextText, state.language);
     },
     setContext(contextText = '', language = state.language) {

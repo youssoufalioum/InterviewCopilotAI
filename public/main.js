@@ -40,6 +40,7 @@ const MAX_HISTORY_MESSAGES = 18;
 
 let aiQuestionCounter = 0;
 let currentAnswerBody = null;
+let pendingQuestionNumber = null;
 
 const transcriptChannels = {
   candidate: null,
@@ -140,8 +141,13 @@ function appendAiSuggestion(markdownText) {
   if (!markdownText || !markdownText.trim()) return;
 
   if (!currentAnswerBody) {
-    aiQuestionCounter += 1;
-    currentAnswerBody = createAiQuestionBlock(aiQuestionCounter);
+    if (pendingQuestionNumber !== null) {
+      currentAnswerBody = createAiQuestionBlock(pendingQuestionNumber);
+      pendingQuestionNumber = null;
+    } else {
+      aiQuestionCounter += 1;
+      currentAnswerBody = createAiQuestionBlock(aiQuestionCounter);
+    }
   }
 
   const existingText = currentAnswerBody.dataset.raw || '';
@@ -224,6 +230,26 @@ function buildTranscriptContext() {
     .map((entry) => `${entry.role === 'candidate' ? 'Candidate' : 'Interviewer'}: ${entry.text}`)
     .join('\n');
 }
+
+
+function hasQuestionInContext(context, language) {
+  const normalized = (context || '').toLowerCase();
+  if (!normalized.trim()) return false;
+  if (normalized.includes('?')) return true;
+
+  const cues = {
+    fr: new RegExp('\\b(pourquoi|comment|quand|quel|quelle|quels|quelles|est-ce que|peux-tu|pouvez-vous|tu peux|vous pouvez)\\b'),
+    en: new RegExp('\\b(why|how|when|what|which|who|where|can you|could you|would you|do you|did you|are you)\\b'),
+    es: new RegExp('\\b(por qué|como|cuándo|qué|cuál|puedes|podrías)\\b'),
+    de: new RegExp('\\b(warum|wie|wann|was|welche|kannst du|können sie)\\b'),
+    it: new RegExp('\\b(perché|come|quando|che|quale|puoi|potresti)\\b'),
+    pt: new RegExp('\\b(por que|como|quando|o que|qual|você pode|pode)\\b')
+  };
+
+  const re = cues[language] || cues.en;
+  return re.test(normalized);
+}
+
 
 function syncAssistantContext() {
   if (!socket || socket.readyState !== WebSocket.OPEN) return;
@@ -816,6 +842,7 @@ clearTranscriptButton.addEventListener('click', () => {
   suggestionBox.textContent = '';
   aiQuestionCounter = 0;
   currentAnswerBody = null;
+  pendingQuestionNumber = null;
   transcriptHistory.length = 0;
   lastTranscriptText.candidate = '';
   lastTranscriptText.interviewer = '';
@@ -829,9 +856,18 @@ aiAnswerButton.addEventListener('click', () => {
   }
 
   const context = buildTranscriptContext();
+  const language = languageSelect.value;
+
+  if (!hasQuestionInContext(context, language)) {
+    setStatus('Aucune question détectée dans la transcription.');
+    return;
+  }
+
   aiQuestionCounter += 1;
-  currentAnswerBody = createAiQuestionBlock(aiQuestionCounter);
-  socket.send(JSON.stringify({ type: 'assistant_answer', context, language: languageSelect.value }));
+  pendingQuestionNumber = aiQuestionCounter;
+  currentAnswerBody = null;
+
+  socket.send(JSON.stringify({ type: 'assistant_answer', context, language }));
   setStatus(`Demande de réponse IA envoyée pour Question ${aiQuestionCounter}...`);
 });
 
