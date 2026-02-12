@@ -351,7 +351,10 @@ async function createTranscriptChannel(role, stream) {
   };
 
   await new Promise((resolve, reject) => {
-    channel.socket.onopen = () => resolve();
+    channel.socket.onopen = () => {
+      channel.socket.send(JSON.stringify({ type: 'session_config', channel: role }));
+      resolve();
+    };
     channel.socket.onerror = () => reject(new Error(`WebSocket ${role} indisponible`));
   });
 
@@ -416,7 +419,10 @@ async function startAssistant() {
     socket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`);
     socket.binaryType = 'arraybuffer';
 
-    socket.onopen = () => setStatus('Connexion websocket établie.');
+    socket.onopen = () => {
+      socket.send(JSON.stringify({ type: 'session_config', channel: 'assistant' }));
+      setStatus('Connexion websocket établie.');
+    };
     socket.onerror = () => setStatus('Erreur WebSocket.');
     socket.onclose = () => setStatus('WebSocket fermé.');
 
