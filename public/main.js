@@ -345,7 +345,7 @@ async function createTranscriptChannel(role, stream) {
       return;
     }
 
-    if (payload.type === 'gemini' && payload.transcript) {
+    if ((payload.type === 'ai' || payload.type === 'gemini') && payload.transcript) {
       appendTranscriptMessage(role, payload.transcript);
     }
   };

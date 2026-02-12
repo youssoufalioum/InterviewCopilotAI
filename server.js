@@ -35,6 +35,25 @@ function sendToClient(clientSocket, payload) {
   }
 }
 
+
+function extractStringsByKey(node, wantedKey, results = []) {
+  if (!node || typeof node !== 'object') return results;
+
+  if (Array.isArray(node)) {
+    for (const item of node) extractStringsByKey(item, wantedKey, results);
+    return results;
+  }
+
+  for (const [key, value] of Object.entries(node)) {
+    if (key.toLowerCase() === wantedKey && typeof value === 'string' && value.trim()) {
+      results.push(value.trim());
+    }
+    extractStringsByKey(value, wantedKey, results);
+  }
+
+  return results;
+}
+
 function buildSessionConfig(channel) {
   const isTranscript = channel === 'candidate' || channel === 'interviewer';
 
@@ -59,9 +78,15 @@ function buildSessionConfig(channel) {
 }
 
 function parseOpenAIEvent(event, state) {
-  // Transcription event (ideal for candidate/interviewer channels)
+  // Primary transcription event (candidate/interviewer channels)
   if (event.type === 'conversation.item.input_audio_transcription.completed' && event.transcript) {
     return { transcript: event.transcript };
+  }
+
+  // Fallback: parse nested transcript fields from other event envelopes.
+  const nestedTranscripts = extractStringsByKey(event, 'transcript');
+  if (nestedTranscripts.length > 0) {
+    return { transcript: nestedTranscripts.join('\n') };
   }
 
   // Assistant text streaming events
