@@ -9,6 +9,7 @@ const fullscreenButton = document.getElementById('fullscreenButton');
 const changeTabButton = document.getElementById('changeTabButton');
 const connectTranscriptButton = document.getElementById('connectTranscriptButton');
 const clearTranscriptButton = document.getElementById('clearTranscriptButton');
+const aiAnswerButton = document.getElementById('aiAnswerButton');
 
 let socket;
 let audioContext;
@@ -611,6 +612,17 @@ clearTranscriptButton.addEventListener('click', () => {
   lastTranscriptText.candidate = '';
   lastTranscriptText.interviewer = '';
   setStatus('Conversation nettoyée.');
+});
+
+
+aiAnswerButton.addEventListener('click', () => {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    setStatus("Démarre l'assistant pour demander une réponse IA.");
+    return;
+  }
+
+  socket.send(JSON.stringify({ type: 'assistant_answer' }));
+  setStatus('Demande de réponse IA envoyée...');
 });
 
 syncFullscreenButton();

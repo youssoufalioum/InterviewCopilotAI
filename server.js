@@ -35,7 +35,6 @@ function sendToClient(clientSocket, payload) {
   }
 }
 
-
 function extractStringsByKey(node, wantedKey, results = []) {
   if (!node || typeof node !== 'object') return results;
 
@@ -52,6 +51,22 @@ function extractStringsByKey(node, wantedKey, results = []) {
   }
 
   return results;
+}
+
+function hasAudioEnergy(base64Audio) {
+  const pcm = Buffer.from(base64Audio, 'base64');
+  if (pcm.length < 2) return false;
+
+  const sampleCount = Math.floor(pcm.length / 2);
+  let sumSquares = 0;
+
+  for (let i = 0; i < sampleCount; i += 1) {
+    const sample = pcm.readInt16LE(i * 2);
+    sumSquares += sample * sample;
+  }
+
+  const rms = Math.sqrt(sumSquares / sampleCount);
+  return rms > 450;
 }
 
 function buildSessionConfig(channel) {
@@ -78,18 +93,15 @@ function buildSessionConfig(channel) {
 }
 
 function parseOpenAIEvent(event, state) {
-  // Primary transcription event (candidate/interviewer channels)
   if (event.type === 'conversation.item.input_audio_transcription.completed' && event.transcript) {
     return { transcript: event.transcript };
   }
 
-  // Fallback: parse nested transcript fields from other event envelopes.
   const nestedTranscripts = extractStringsByKey(event, 'transcript');
   if (nestedTranscripts.length > 0) {
     return { transcript: nestedTranscripts.join('\n') };
   }
 
-  // Assistant text streaming events
   if (event.type === 'response.output_text.delta' && event.delta) {
     state.pendingSuggestion += event.delta;
     return null;
@@ -101,7 +113,6 @@ function parseOpenAIEvent(event, state) {
     return text ? { suggestion: text } : null;
   }
 
-  // Compatibility with alt response stream event names
   if (event.type === 'response.text.delta' && event.delta) {
     state.pendingSuggestion += event.delta;
     return null;
@@ -127,7 +138,30 @@ function connectOpenAIRealtime(clientSocket, channel) {
   const state = {
     pendingSuggestion: '',
     audioSinceLastCommit: false,
-    closed: false
+    closed: false,
+    channel
+  };
+
+  const isTranscriptChannel = channel === 'candidate' || channel === 'interviewer';
+
+  const commitAndRespond = () => {
+    if (upstream.readyState !== WebSocket.OPEN || !state.audioSinceLastCommit) {
+      if (upstream.readyState === WebSocket.OPEN && !state.audioSinceLastCommit) {
+        sendToClient(clientSocket, { type: 'status', message: 'Aucun audio détecté pour générer une réponse.' });
+      }
+      return;
+    }
+
+    upstream.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
+    upstream.send(
+      JSON.stringify({
+        type: 'response.create',
+        response: {
+          modalities: ['text']
+        }
+      })
+    );
+    state.audioSinceLastCommit = false;
   };
 
   upstream.on('open', () => {
@@ -168,25 +202,16 @@ function connectOpenAIRealtime(clientSocket, channel) {
     sendToClient(clientSocket, { type: 'error', message: `OpenAI Realtime error: ${error.message}` });
   });
 
-  // Commit buffered audio periodically to produce timely transcripts/suggestions.
-  const commitTimer = setInterval(() => {
-    if (upstream.readyState !== WebSocket.OPEN || !state.audioSinceLastCommit) return;
-
-    upstream.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
-    upstream.send(
-      JSON.stringify({
-        type: 'response.create',
-        response: {
-          modalities: ['text']
-        }
-      })
-    );
-    state.audioSinceLastCommit = false;
-  }, 900);
+  const transcriptCommitTimer = isTranscriptChannel
+    ? setInterval(() => {
+        if (upstream.readyState !== WebSocket.OPEN || !state.audioSinceLastCommit) return;
+        commitAndRespond();
+      }, 900)
+    : null;
 
   const close = () => {
     state.closed = true;
-    clearInterval(commitTimer);
+    if (transcriptCommitTimer) clearInterval(transcriptCommitTimer);
     if (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING) {
       upstream.close();
     }
@@ -195,8 +220,14 @@ function connectOpenAIRealtime(clientSocket, channel) {
   return {
     sendAudioBase64(base64Audio) {
       if (upstream.readyState !== WebSocket.OPEN) return;
+      if (!hasAudioEnergy(base64Audio)) return;
+
       upstream.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: base64Audio }));
       state.audioSinceLastCommit = true;
+    },
+    requestAssistantAnswer() {
+      if (isTranscriptChannel) return;
+      commitAndRespond();
     },
     close
   };
@@ -243,6 +274,13 @@ wss.on('connection', (clientSocket) => {
           if (['assistant', 'candidate', 'interviewer'].includes(payload.channel)) {
             resetBridgeForChannel(payload.channel);
           }
+          return;
+        }
+
+        if (payload.type === 'assistant_answer') {
+          ensureBridge();
+          bridge.requestAssistantAnswer();
+          return;
         }
       } catch {
         // ignore non-json text frames
