@@ -41,6 +41,7 @@ const MAX_HISTORY_MESSAGES = 18;
 let aiQuestionCounter = 0;
 let currentAnswerBody = null;
 let pendingQuestionNumber = null;
+let pendingQuestionTitle = "";
 
 const transcriptChannels = {
   candidate: null,
@@ -101,30 +102,86 @@ function escapeHtml(text) {
 }
 
 function markdownToHtml(markdown) {
-  let html = escapeHtml(markdown || '');
+  const source = markdown || '';
+  const codeFence = /```([a-zA-Z0-9_-]+)?\n([\s\S]*?)```/g;
+  let lastIndex = 0;
+  const parts = [];
 
-  html = html.replace(/^###\s+(.+)$/gm, '<h5>$1</h5>');
-  html = html.replace(/^##\s+(.+)$/gm, '<h4>$1</h4>');
-  html = html.replace(/^#\s+(.+)$/gm, '<h3>$1</h3>');
-  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-  html = html.replace(/^-\s+(.+)$/gm, '<li>$1</li>');
-  html = html.replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>');
-  html = html.replace(/\n\n+/g, '</p><p>');
-  html = `<p>${html}</p>`;
-  html = html.replace(/<p>\s*<\/p>/g, '');
-  html = html.replace(/\n/g, '<br />');
+  for (const match of source.matchAll(codeFence)) {
+    const [full, lang = '', code = ''] = match;
+    const startIndex = match.index || 0;
+    const textChunk = source.slice(lastIndex, startIndex);
+    if (textChunk.trim()) parts.push({ type: 'text', value: textChunk });
+    parts.push({ type: 'code', lang: lang.trim(), code: code.trimEnd() });
+    lastIndex = startIndex + full.length;
+  }
 
-  return html;
+  const tail = source.slice(lastIndex);
+  if (tail.trim()) parts.push({ type: 'text', value: tail });
+
+  if (!parts.length) return '<p></p>';
+
+  return parts
+    .map((part) => {
+      if (part.type === 'code') {
+        const langLabel = part.lang ? `<span class="code-lang">${escapeHtml(part.lang)}</span>` : '';
+        return `<div class="code-block"><div class="code-toolbar">${langLabel}<button class="copy-code-button" data-code="${encodeURIComponent(part.code)}" type="button">Copier</button></div><pre><code>${escapeHtml(part.code)}</code></pre></div>`;
+      }
+
+      let html = escapeHtml(part.value);
+      html = html.replace(/^###\s+(.+)$/gm, '<h5>$1</h5>');
+      html = html.replace(/^##\s+(.+)$/gm, '<h4>$1</h4>');
+      html = html.replace(/^#\s+(.+)$/gm, '<h3>$1</h3>');
+      html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+      html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+      html = html.replace(/^-\s+(.+)$/gm, '<li>$1</li>');
+      html = html.replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>');
+      html = html.replace(/\n\n+/g, '</p><p>');
+      html = `<p>${html}</p>`;
+      html = html.replace(/<p>\s*<\/p>/g, '');
+      html = html.replace(/\n/g, '<br />');
+      return html;
+    })
+    .join('');
 }
 
-function createAiQuestionBlock(questionNumber) {
+function extractDetectedQuestion(context, language) {
+  const lines = (context || '').split('\n').map((line) => line.trim()).filter(Boolean);
+  const prioritized = [
+    ...lines.filter((line) => line.toLowerCase().startsWith('interviewer:')),
+    ...lines.filter((line) => line.toLowerCase().startsWith('candidate:'))
+  ];
+
+  for (let i = prioritized.length - 1; i >= 0; i -= 1) {
+    const cleaned = prioritized[i].replace(/^(interviewer|candidate):\s*/i, '').trim();
+    if (!cleaned) continue;
+    if (cleaned.includes('?') || hasQuestionInContext(cleaned, language)) {
+      return cleaned;
+    }
+  }
+
+  return '';
+}
+
+function reformulateQuestionTitle(rawQuestion) {
+  const cleaned = (rawQuestion || '').replace(/\s+/g, ' ').trim();
+  if (!cleaned) return '';
+
+  let normalized = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+  if (!/[?.!]$/.test(normalized)) {
+    normalized += ' ?';
+  }
+
+  return normalized;
+}
+
+function createAiQuestionBlock(questionNumber, questionTitle = '') {
   const block = document.createElement('section');
   block.className = 'qa-block';
 
   const title = document.createElement('h4');
   title.className = 'qa-title';
-  title.textContent = `Question ${questionNumber}`;
+  title.textContent = questionTitle ? `Question ${questionNumber} : ${questionTitle}` : `Question ${questionNumber}`;
 
   const body = document.createElement('div');
   body.className = 'qa-body';
@@ -142,8 +199,9 @@ function appendAiSuggestion(markdownText) {
 
   if (!currentAnswerBody) {
     if (pendingQuestionNumber !== null) {
-      currentAnswerBody = createAiQuestionBlock(pendingQuestionNumber);
+      currentAnswerBody = createAiQuestionBlock(pendingQuestionNumber, pendingQuestionTitle || '');
       pendingQuestionNumber = null;
+      pendingQuestionTitle = "";
     } else {
       aiQuestionCounter += 1;
       currentAnswerBody = createAiQuestionBlock(aiQuestionCounter);
@@ -843,6 +901,7 @@ clearTranscriptButton.addEventListener('click', () => {
   aiQuestionCounter = 0;
   currentAnswerBody = null;
   pendingQuestionNumber = null;
+  pendingQuestionTitle = "";
   transcriptHistory.length = 0;
   lastTranscriptText.candidate = '';
   lastTranscriptText.interviewer = '';
@@ -863,12 +922,37 @@ aiAnswerButton.addEventListener('click', () => {
     return;
   }
 
+  const detectedQuestion = extractDetectedQuestion(context, language);
+  const displayQuestion = reformulateQuestionTitle(detectedQuestion);
+
   aiQuestionCounter += 1;
   pendingQuestionNumber = aiQuestionCounter;
+  pendingQuestionTitle = displayQuestion;
   currentAnswerBody = null;
 
-  socket.send(JSON.stringify({ type: 'assistant_answer', context, language }));
+  socket.send(JSON.stringify({ type: 'assistant_answer', context, language, question: detectedQuestion }));
   setStatus(`Demande de réponse IA envoyée pour Question ${aiQuestionCounter}...`);
+});
+
+
+document.addEventListener('click', async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  if (!target.classList.contains('copy-code-button')) return;
+
+  const encoded = target.dataset.code || '';
+  const code = decodeURIComponent(encoded);
+
+  try {
+    await navigator.clipboard.writeText(code);
+    const original = target.textContent;
+    target.textContent = 'Copié !';
+    setTimeout(() => {
+      target.textContent = original || 'Copier';
+    }, 1200);
+  } catch {
+    setStatus('Impossible de copier le code automatiquement.');
+  }
 });
 
 toggleButton.addEventListener('click', async () => {

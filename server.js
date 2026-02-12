@@ -181,14 +181,16 @@ function connectOpenAIRealtime(clientSocket, channel, language) {
     closed: false,
     channel,
     language: normalizeLanguage(language),
-    contextText: ''
+    contextText: '',
+    detectedQuestion: ''
   };
 
   const isTranscriptChannel = channel === 'candidate' || channel === 'interviewer';
 
-  const commitAndRespond = (contextOverride = '', requestedLanguage = state.language) => {
+  const commitAndRespond = (contextOverride = '', requestedLanguage = state.language, detectedQuestion = '') => {
     const effectiveLanguage = normalizeLanguage(requestedLanguage);
     const injectedContext = (contextOverride || state.contextText || '').trim();
+    const cleanQuestion = (detectedQuestion || state.detectedQuestion || '').trim();
 
     if (upstream.readyState !== WebSocket.OPEN) return;
 
@@ -202,14 +204,20 @@ function connectOpenAIRealtime(clientSocket, channel, language) {
 
     if (isTranscriptChannel) return;
 
+    const questionInstruction = cleanQuestion
+      ? `Detected interview question: ${cleanQuestion}`
+      : 'No explicit detected question provided.';
+
     upstream.send(
       JSON.stringify({
         type: 'response.create',
         response: {
           modalities: ['text'],
-          instructions: injectedContext
-            ? `Language=${effectiveLanguage}. Transcript context:\n${injectedContext}\n\nAnswer only from this context and do not invent.`
-            : `Language=${effectiveLanguage}. Réponds de manière concise.`
+          instructions: `Language=${effectiveLanguage}. ${questionInstruction}
+Transcript context:
+${injectedContext}
+
+Answer only from this context, do not invent facts, and structure response in concise markdown bullet points.`
         }
       })
     );
@@ -280,9 +288,10 @@ function connectOpenAIRealtime(clientSocket, channel, language) {
       upstream.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: base64Audio }));
       state.audioSinceLastCommit = true;
     },
-    requestAssistantAnswer(contextText = '', language = state.language) {
+    requestAssistantAnswer(contextText = '', language = state.language, detectedQuestion = '') {
       if (isTranscriptChannel) return;
       if (contextText && contextText.trim()) state.contextText = contextText.trim();
+      if (detectedQuestion && detectedQuestion.trim()) state.detectedQuestion = detectedQuestion.trim();
       state.language = normalizeLanguage(language);
 
       if (!hasQuestionInContext(state.contextText, state.language)) {
@@ -290,7 +299,7 @@ function connectOpenAIRealtime(clientSocket, channel, language) {
         return;
       }
 
-      commitAndRespond(contextText, state.language);
+      commitAndRespond(contextText, state.language, detectedQuestion);
     },
     setContext(contextText = '', language = state.language) {
       state.contextText = (contextText || '').trim();
@@ -361,7 +370,7 @@ wss.on('connection', (clientSocket) => {
 
         if (payload.type === 'assistant_answer') {
           ensureBridge();
-          bridge.requestAssistantAnswer(payload.context || '', payload.language || language);
+          bridge.requestAssistantAnswer(payload.context || '', payload.language || language, payload.question || '');
           return;
         }
       } catch {
