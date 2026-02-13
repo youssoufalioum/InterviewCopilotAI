@@ -156,6 +156,7 @@ body {
   border-radius: 8px;
   padding: 7px 12px;
   color: #374151;
+  cursor: pointer;
 }
 
 .chat-scroll {
