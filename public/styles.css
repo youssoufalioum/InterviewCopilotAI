@@ -267,8 +267,17 @@ body {
   overflow: hidden;
 }
 
-.answer-card h3 {
-  margin: 0 0 10px;
+
+.answer-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.answer-card-head h3 {
+  margin: 0;
   font-size: 1.08rem;
 }
 

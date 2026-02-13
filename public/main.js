@@ -11,6 +11,7 @@ const connectTranscriptButton = document.getElementById('connectTranscriptButton
 const toggleMicrophoneButton = document.getElementById('toggleMicrophoneButton');
 const clearTranscriptButton = document.getElementById('clearTranscriptButton');
 const aiAnswerButton = document.getElementById('aiAnswerButton');
+const downloadPdfButton = document.getElementById('downloadPdfButton');
 const languageSelect = document.getElementById('languageSelect');
 const timerPill = document.getElementById('timerPill');
 
@@ -842,6 +843,52 @@ async function stopAllStreamsAndTranscriptions() {
   }
 }
 
+
+
+function exportSuggestionsToPdf() {
+  const qaBlocks = Array.from(suggestionBox.querySelectorAll('.qa-block'));
+  if (!qaBlocks.length) {
+    setStatus('Aucune question/réponse à exporter.');
+    return;
+  }
+
+  const printableContent = qaBlocks.map((block) => block.outerHTML).join('');
+  const printWindow = window.open('', '_blank', 'width=900,height=700');
+
+  if (!printWindow) {
+    setStatus("Impossible d'ouvrir la fenêtre d'impression.");
+    return;
+  }
+
+  printWindow.document.write(`<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<title>Interview Copilot - Export PDF</title>
+<style>
+body { font-family: Inter, Arial, sans-serif; margin: 24px; color: #0f172a; }
+h1 { margin: 0 0 16px; font-size: 22px; }
+.qa-block { border: 1px solid #d6dfec; border-radius: 10px; background: #f8fbff; padding: 12px; margin-bottom: 12px; page-break-inside: avoid; }
+.qa-title { margin: 0 0 8px; color: #1e3a8a; font-size: 16px; }
+.qa-body p { margin: 6px 0; }
+.qa-body ul { margin: 6px 0 6px 20px; }
+.code-block { border: 1px solid #1f2937; border-radius: 8px; overflow: hidden; margin: 10px 0; }
+.code-toolbar, .copy-code-button { display: none !important; }
+.qa-body pre { margin: 0; padding: 10px; background: #0f172a; color: #f8fafc; overflow-x: auto; }
+@media print { body { margin: 12mm; } }
+</style>
+</head>
+<body>
+<h1>Interview Copilot — Questions / Réponses</h1>
+${printableContent}
+</body>
+</html>`);
+
+  printWindow.document.close();
+  printWindow.focus();
+  printWindow.print();
+}
+
 function updateMicButtonLabel() {
   toggleMicrophoneButton.textContent = isMicrophoneEnabled ? 'Désactiver micro' : 'Activer micro';
 }
@@ -894,6 +941,8 @@ toggleMicrophoneButton.addEventListener('click', async () => {
     await connectTranscriptChannels();
   }
 });
+
+downloadPdfButton.addEventListener('click', exportSuggestionsToPdf);
 
 clearTranscriptButton.addEventListener('click', () => {
   transcriptBox.innerHTML = '';
