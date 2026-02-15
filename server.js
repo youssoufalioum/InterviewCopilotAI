@@ -108,7 +108,7 @@ function buildSessionConfig(channel, language) {
     type: 'session.update',
     session: {
       instructions: isTranscript
-        ? `${TRANSCRIPT_SYSTEM_INSTRUCTION} The spoken language is ${languageHint}. Do not translate.`
+        ? `${TRANSCRIPT_SYSTEM_INSTRUCTION} The spoken language is strictly ${languageHint}. Do not translate and do not switch language.`
         : `${ASSISTANT_SYSTEM_INSTRUCTION} The interview language is ${languageHint}.`,
       modalities: ['text'],
       input_audio_format: 'pcm16',
@@ -116,7 +116,7 @@ function buildSessionConfig(channel, language) {
       input_audio_transcription: {
         model: 'gpt-4o-mini-transcribe',
         language: lang,
-        prompt: `Primary spoken language: ${languageHint}.`
+        prompt: `Primary spoken language is strictly ${languageHint}. Keep original language only, no translation, no interpretation.`
       },
       turn_detection: {
         type: 'server_vad',
@@ -182,10 +182,43 @@ function connectOpenAIRealtime(clientSocket, channel, language) {
     channel,
     language: normalizeLanguage(language),
     contextText: '',
-    detectedQuestion: ''
+    detectedQuestion: '',
+    pendingTranscriptCorrection: '',
+    transcriptCorrectionInFlight: false,
+    queuedTranscriptForCorrection: ''
   };
 
   const isTranscriptChannel = channel === 'candidate' || channel === 'interviewer';
+
+  const requestTranscriptCorrection = (rawTranscript) => {
+    const transcript = (rawTranscript || '').replace(/\s+/g, ' ').trim();
+    if (!transcript) return;
+
+    if (state.transcriptCorrectionInFlight) {
+      state.queuedTranscriptForCorrection = transcript;
+      return;
+    }
+
+    if (upstream.readyState !== WebSocket.OPEN) {
+      sendToClient(clientSocket, { type: 'ai', transcript, transcriptDelta: '', suggestion: '' });
+      return;
+    }
+
+    state.transcriptCorrectionInFlight = true;
+    state.pendingTranscriptCorrection = '';
+
+    const lang = languageLabel(normalizeLanguage(state.language));
+
+    upstream.send(
+      JSON.stringify({
+        type: 'response.create',
+        response: {
+          modalities: ['text'],
+          instructions: `You are a realtime transcript corrector. Correct only obvious ASR mistakes for this sentence while preserving meaning and wording. Keep strictly ${lang}. Never translate. Never add explanations. Return only the corrected sentence. Input: ${transcript}`
+        }
+      })
+    );
+  };
 
   const commitAndRespond = (contextOverride = '', requestedLanguage = state.language, detectedQuestion = '') => {
     const effectiveLanguage = normalizeLanguage(requestedLanguage);
@@ -239,8 +272,43 @@ Answer only from this context, do not invent facts, and structure response in co
       return;
     }
 
+    if (isTranscriptChannel) {
+      if ((event.type === 'response.output_text.delta' || event.type === 'response.text.delta') && event.delta) {
+        state.pendingTranscriptCorrection += event.delta;
+        return;
+      }
+
+      if (event.type === 'response.output_text.done' || event.type === 'response.text.done') {
+        const corrected = state.pendingTranscriptCorrection.trim();
+        state.pendingTranscriptCorrection = '';
+        state.transcriptCorrectionInFlight = false;
+
+        if (corrected) {
+          sendToClient(clientSocket, {
+            type: 'ai',
+            transcript: corrected,
+            transcriptDelta: '',
+            suggestion: '',
+            raw: event
+          });
+        }
+
+        if (state.queuedTranscriptForCorrection) {
+          const queued = state.queuedTranscriptForCorrection;
+          state.queuedTranscriptForCorrection = '';
+          requestTranscriptCorrection(queued);
+        }
+        return;
+      }
+    }
+
     const parsed = parseOpenAIEvent(event, state, isTranscriptChannel);
     if (!parsed) return;
+
+    if (isTranscriptChannel && parsed.transcript) {
+      requestTranscriptCorrection(parsed.transcript);
+      return;
+    }
 
     sendToClient(clientSocket, {
       type: 'ai',
