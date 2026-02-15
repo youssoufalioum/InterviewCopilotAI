@@ -296,7 +296,8 @@ body {
 .bottom-actions {
   border-top: 1px solid var(--border);
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: auto auto 1fr;
+  align-items: center;
   gap: 10px;
   padding: 12px;
 }
@@ -319,6 +320,39 @@ body {
 .cta-secondary {
   background: #fff;
   color: #111827;
+}
+
+.cta-main-compact {
+  padding: 9px 12px;
+  white-space: nowrap;
+}
+
+.auto-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #d6dcea;
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: #fff;
+  font-weight: 600;
+  color: #111827;
+  cursor: pointer;
+}
+
+.auto-switch input {
+  accent-color: #1d4ed8;
+  cursor: pointer;
+}
+
+.switch-state {
+  font-size: 0.78rem;
+  color: #6b7280;
+  min-width: 28px;
+}
+
+.auto-switch input:checked + .switch-state {
+  color: #047857;
 }
 
 @media (max-width: 1120px) {

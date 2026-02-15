@@ -11,6 +11,8 @@ const connectTranscriptButton = document.getElementById('connectTranscriptButton
 const toggleMicrophoneButton = document.getElementById('toggleMicrophoneButton');
 const clearTranscriptButton = document.getElementById('clearTranscriptButton');
 const aiAnswerButton = document.getElementById('aiAnswerButton');
+const autoAssistToggle = document.getElementById('autoAssistToggle');
+const autoAssistState = document.getElementById('autoAssistState');
 const downloadPdfButton = document.getElementById('downloadPdfButton');
 const languageSelect = document.getElementById('languageSelect');
 const timerPill = document.getElementById('timerPill');
@@ -31,7 +33,9 @@ let startTimestampMs = 0;
 
 let isRunning = false;
 let isTranscriptConnected = false;
-let isMicrophoneEnabled = true;
+let isMicrophoneEnabled = false;
+let isAutoAssistEnabled = false;
+let lastAutoAssistQuestion = "";
 
 let pendingPCM = new Int16Array(0);
 
@@ -63,6 +67,45 @@ const lastTranscriptText = {
 
 function setStatus(message) {
   statusLabel.textContent = message;
+}
+
+function setAutoAssistEnabled(enabled) {
+  isAutoAssistEnabled = Boolean(enabled);
+  if (autoAssistToggle) autoAssistToggle.checked = isAutoAssistEnabled;
+  if (autoAssistState) autoAssistState.textContent = isAutoAssistEnabled ? 'ON' : 'OFF';
+}
+
+function triggerAiAnswer({ manual = false } = {}) {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    if (manual) setStatus("Démarre l'assistant pour demander une réponse IA.");
+    return false;
+  }
+
+  const context = buildTranscriptContext();
+  const language = languageSelect.value;
+
+  if (!hasQuestionInContext(context, language)) {
+    if (manual) setStatus('Aucune question détectée dans la transcription.');
+    return false;
+  }
+
+  const detectedQuestion = extractDetectedQuestion(context, language);
+  const displayQuestion = reformulateQuestionTitle(detectedQuestion);
+  const signature = `${language}:${displayQuestion.toLowerCase()}`;
+
+  if (!manual && signature && signature === lastAutoAssistQuestion) {
+    return false;
+  }
+
+  aiQuestionCounter += 1;
+  pendingQuestionNumber = aiQuestionCounter;
+  pendingQuestionTitle = displayQuestion;
+  currentAnswerBody = null;
+  lastAutoAssistQuestion = signature;
+
+  socket.send(JSON.stringify({ type: 'assistant_answer', context, language, question: detectedQuestion }));
+  setStatus(`Demande de réponse IA envoyée pour Question ${aiQuestionCounter}...`);
+  return true;
 }
 
 function formatElapsed(ms) {
@@ -371,6 +414,11 @@ function finalizeDraft(role) {
   draft.meta.textContent = role === 'candidate' ? 'Candidat' : 'Interviewer';
   pushTranscriptHistory(role, normalized);
   syncAssistantContext();
+
+  if (role === 'interviewer' && isAutoAssistEnabled && isRunning) {
+    triggerAiAnswer({ manual: false });
+  }
+
   transcriptDrafts[role] = null;
 }
 
@@ -478,16 +526,22 @@ async function requestSystemShare() {
   });
 }
 
-async function ensureMediaStreams() {
-  if (!microphoneStream) {
-    microphoneStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        channelCount: 1,
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false
-      }
-    });
+async function ensureMicrophoneStream() {
+  if (microphoneStream) return microphoneStream;
+  microphoneStream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      channelCount: 1,
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false
+    }
+  });
+  return microphoneStream;
+}
+
+async function ensureMediaStreams({ needMicrophone = false } = {}) {
+  if (needMicrophone) {
+    await ensureMicrophoneStream();
   }
 
   if (!systemStream) {
@@ -689,7 +743,7 @@ async function startAssistant() {
 
   try {
     setStatus('Demande des permissions audio...');
-    await ensureMediaStreams();
+    await ensureMediaStreams({ needMicrophone: isMicrophoneEnabled });
 
     socket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`);
     socket.binaryType = 'arraybuffer';
@@ -723,17 +777,20 @@ async function startAssistant() {
     audioContext = new AudioContext({ latencyHint: 'interactive' });
     await audioContext.audioWorklet.addModule('./audio-processor.js');
 
-    micSource = audioContext.createMediaStreamSource(microphoneStream);
     systemSource = audioContext.createMediaStreamSource(systemStream);
 
     micGainNode = audioContext.createGain();
     systemGainNode = audioContext.createGain();
     mixedNode = audioContext.createGain();
 
-    micGainNode.gain.value = 1.0;
+    micGainNode.gain.value = isMicrophoneEnabled ? 1.0 : 0.0;
     systemGainNode.gain.value = 1.0;
 
-    micSource.connect(micGainNode);
+    if (isMicrophoneEnabled && microphoneStream) {
+      micSource = audioContext.createMediaStreamSource(microphoneStream);
+      micSource.connect(micGainNode);
+    }
+
     systemSource.connect(systemGainNode);
     micGainNode.connect(mixedNode);
     systemGainNode.connect(mixedNode);
@@ -838,6 +895,9 @@ async function stopAllStreamsAndTranscriptions() {
 
   clearPreviewStream();
 
+  isMicrophoneEnabled = false;
+  updateMicButtonLabel();
+
   if (document.fullscreenElement === previewStage) {
     await document.exitFullscreen();
   }
@@ -934,12 +994,37 @@ connectTranscriptButton.addEventListener('click', async () => {
 
 toggleMicrophoneButton.addEventListener('click', async () => {
   isMicrophoneEnabled = !isMicrophoneEnabled;
+
+  if (isMicrophoneEnabled) {
+    try {
+      await ensureMicrophoneStream();
+    } catch (error) {
+      isMicrophoneEnabled = false;
+      updateMicButtonLabel();
+      setStatus(formatPermissionError(error));
+      return;
+    }
+  }
+
   updateMicButtonLabel();
+
+  if (isRunning && micGainNode) {
+    micGainNode.gain.value = isMicrophoneEnabled ? 1.0 : 0.0;
+
+    if (isMicrophoneEnabled && !micSource && microphoneStream && audioContext) {
+      micSource = audioContext.createMediaStreamSource(microphoneStream);
+      micSource.connect(micGainNode);
+    }
+  }
 
   if (isTranscriptConnected) {
     await disconnectTranscriptChannels();
     await connectTranscriptChannels();
   }
+});
+
+autoAssistToggle.addEventListener('change', () => {
+  setAutoAssistEnabled(autoAssistToggle.checked);
 });
 
 downloadPdfButton.addEventListener('click', exportSuggestionsToPdf);
@@ -954,34 +1039,15 @@ clearTranscriptButton.addEventListener('click', () => {
   transcriptHistory.length = 0;
   lastTranscriptText.candidate = '';
   lastTranscriptText.interviewer = '';
+  lastAutoAssistQuestion = '';
   setStatus('Conversation nettoyée.');
 });
 
 aiAnswerButton.addEventListener('click', () => {
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    setStatus("Démarre l'assistant pour demander une réponse IA.");
-    return;
-  }
-
-  const context = buildTranscriptContext();
-  const language = languageSelect.value;
-
-  if (!hasQuestionInContext(context, language)) {
-    setStatus('Aucune question détectée dans la transcription.');
-    return;
-  }
-
-  const detectedQuestion = extractDetectedQuestion(context, language);
-  const displayQuestion = reformulateQuestionTitle(detectedQuestion);
-
-  aiQuestionCounter += 1;
-  pendingQuestionNumber = aiQuestionCounter;
-  pendingQuestionTitle = displayQuestion;
-  currentAnswerBody = null;
-
-  socket.send(JSON.stringify({ type: 'assistant_answer', context, language, question: detectedQuestion }));
-  setStatus(`Demande de réponse IA envoyée pour Question ${aiQuestionCounter}...`);
+  triggerAiAnswer({ manual: true });
 });
+
+
 
 
 document.addEventListener('click', async (event) => {
@@ -1007,7 +1073,9 @@ document.addEventListener('click', async (event) => {
 toggleButton.addEventListener('click', async () => {
   if (isRunning) {
     await stopAssistant();
-    if (!isTranscriptConnected) await stopAllStreamsAndTranscriptions();
+    await stopAllStreamsAndTranscriptions();
+    setAutoAssistEnabled(false);
+    lastAutoAssistQuestion = '';
     return;
   }
   await startAssistant();
@@ -1015,3 +1083,4 @@ toggleButton.addEventListener('click', async () => {
 
 syncFullscreenButton();
 updateMicButtonLabel();
+setAutoAssistEnabled(false);
