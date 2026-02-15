@@ -399,7 +399,34 @@ function createTranscriptBubble(role) {
   transcriptBox.appendChild(row);
   transcriptBox.scrollTop = transcriptBox.scrollHeight;
 
-  return { row, bubble, meta, text: '', queue: '', timer: null, finalizeTimer: null, role };
+  return {
+    row,
+    bubble,
+    meta,
+    text: '',
+    queue: '',
+    timer: null,
+    finalizeTimer: null,
+    role
+  };
+}
+
+function ensureTranscriptDraft(role) {
+  if (!transcriptDrafts[role]) {
+    transcriptDrafts[role] = createTranscriptBubble(role);
+  }
+  return transcriptDrafts[role];
+}
+
+function scheduleDraftFinalize(role, delayMs = 1400) {
+  const draft = transcriptDrafts[role];
+  if (!draft) return;
+
+  if (draft.finalizeTimer) {
+    clearTimeout(draft.finalizeTimer);
+  }
+
+  draft.finalizeTimer = setTimeout(() => finalizeDraft(role), delayMs);
 }
 
 function finalizeDraft(role) {
@@ -416,7 +443,13 @@ function finalizeDraft(role) {
     draft.finalizeTimer = null;
   }
 
-  const normalized = draft.text.trim();
+  if (draft.queue) {
+    draft.text += draft.queue;
+    draft.queue = '';
+    draft.bubble.textContent = draft.text;
+  }
+
+  const normalized = draft.text.replace(/\s+/g, ' ').trim();
   if (!normalized) {
     draft.row.remove();
     transcriptDrafts[role] = null;
@@ -431,11 +464,14 @@ function finalizeDraft(role) {
 
   lastTranscriptText[role] = normalized;
   draft.meta.textContent = role === 'candidate' ? 'Candidat' : 'Interviewer';
+  draft.text = normalized;
+  draft.bubble.textContent = normalized;
+
   pushTranscriptHistory(role, normalized);
   syncAssistantContext();
 
   if (role === 'interviewer') {
-    scheduleAutoAssistCheck(250);
+    scheduleAutoAssistCheck(300);
   }
 
   transcriptDrafts[role] = null;
@@ -452,34 +488,45 @@ function ensureDraftTicker(role) {
       return;
     }
 
-    draft.text += draft.queue.slice(0, 1);
-    draft.queue = draft.queue.slice(1);
+    const take = Math.min(3, draft.queue.length);
+    draft.text += draft.queue.slice(0, take);
+    draft.queue = draft.queue.slice(take);
     draft.bubble.textContent = draft.text;
     transcriptBox.scrollTop = transcriptBox.scrollHeight;
-  }, 18);
+  }, 16);
 }
 
-function appendTranscriptStream(role, text) {
-  const normalized = (text || '').trim();
+function appendTranscriptDelta(role, deltaText) {
+  if (!deltaText) return;
+
+  const draft = ensureTranscriptDraft(role);
+  draft.queue += deltaText;
+  ensureDraftTicker(role);
+  scheduleDraftFinalize(role, 1600);
+
+  if (role === 'interviewer') {
+    scheduleAutoAssistCheck(1200);
+  }
+}
+
+function applyTranscriptCompleted(role, transcriptText) {
+  const normalized = (transcriptText || '').replace(/\s+/g, ' ').trim();
   if (!normalized) return;
 
-  if (!transcriptDrafts[role]) {
-    transcriptDrafts[role] = createTranscriptBubble(role);
+  const draft = ensureTranscriptDraft(role);
+
+  if (draft.timer) {
+    clearInterval(draft.timer);
+    draft.timer = null;
   }
 
-  const draft = transcriptDrafts[role];
-  const separator = draft.text.length > 0 || draft.queue.length > 0 ? ' ' : '';
-  draft.queue += `${separator}${normalized}`;
+  draft.queue = '';
+  draft.text = normalized;
+  draft.bubble.textContent = normalized;
+  draft.meta.textContent = role === 'candidate' ? 'Candidat (finalisation...)' : 'Interviewer (finalisation...)';
+  transcriptBox.scrollTop = transcriptBox.scrollHeight;
 
-  if (draft.finalizeTimer) {
-    clearTimeout(draft.finalizeTimer);
-  }
-  draft.finalizeTimer = setTimeout(() => finalizeDraft(role), 900);
-  ensureDraftTicker(role);
-
-  if (role === "interviewer") {
-    scheduleAutoAssistCheck(900);
-  }
+  scheduleDraftFinalize(role, 220);
 }
 
 function clearAllDrafts() {
@@ -686,11 +733,11 @@ async function createTranscriptChannel(role, stream) {
     }
 
     if ((payload.type === 'ai' || payload.type === 'gemini') && payload.transcriptDelta) {
-      appendTranscriptStream(role, payload.transcriptDelta);
+      appendTranscriptDelta(role, payload.transcriptDelta);
     }
 
     if ((payload.type === 'ai' || payload.type === 'gemini') && payload.transcript) {
-      appendTranscriptStream(role, payload.transcript);
+      applyTranscriptCompleted(role, payload.transcript);
     }
   };
 

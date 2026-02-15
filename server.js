@@ -66,7 +66,7 @@ function hasAudioEnergy(base64Audio) {
   }
 
   const rms = Math.sqrt(sumSquares / sampleCount);
-  return rms > 120;
+  return rms > 70;
 }
 
 function normalizeLanguage(language) {
@@ -121,8 +121,8 @@ function buildSessionConfig(channel, language) {
       turn_detection: {
         type: 'server_vad',
         threshold: 0.45,
-        prefix_padding_ms: 350,
-        silence_duration_ms: 650
+        prefix_padding_ms: 450,
+        silence_duration_ms: 900
       }
     }
   };
@@ -269,7 +269,7 @@ Answer only from this context, do not invent facts, and structure response in co
     ? setInterval(() => {
         if (upstream.readyState !== WebSocket.OPEN || !state.audioSinceLastCommit) return;
         commitAndRespond('', state.language);
-      }, 1100)
+      }, 1500)
     : null;
 
   const close = () => {
