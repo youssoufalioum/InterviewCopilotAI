@@ -622,14 +622,27 @@ async function enableSpeakerCam() {
     throw new Error("Aucune piste vidéo webcam détectée.");
   }
 
-  speakerCamVideo.srcObject = speakerCamStream;
+  isSpeakerCamVisible = true;
+  updateSpeakerCamUi();
+
+  const camStream = new MediaStream([videoTracks[0]]);
+  speakerCamVideo.srcObject = camStream;
 
   await new Promise((resolve) => {
-    if (speakerCamVideo.readyState >= 1) {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
       resolve();
+    };
+
+    if (speakerCamVideo.readyState >= 1) {
+      finish();
       return;
     }
-    speakerCamVideo.onloadedmetadata = () => resolve();
+
+    speakerCamVideo.onloadedmetadata = finish;
+    setTimeout(finish, 800);
   });
 
   try {
@@ -642,9 +655,6 @@ async function enableSpeakerCam() {
   if (videoTrack) {
     videoTrack.onended = () => disableSpeakerCam();
   }
-
-  isSpeakerCamVisible = true;
-  updateSpeakerCamUi();
 }
 
 function disableSpeakerCam() {

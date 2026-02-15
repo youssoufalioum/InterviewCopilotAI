@@ -139,6 +139,7 @@ body {
   object-fit: cover;
   display: block;
   background: #111827;
+  z-index: 1;
 }
 
 .speaker-cam-placeholder {
@@ -150,6 +151,7 @@ body {
   color: #475569;
   background: linear-gradient(135deg, #dbe7ff, #eff4ff);
   pointer-events: none;
+  z-index: 3;
 }
 
 .speaker-cam-toggle {
