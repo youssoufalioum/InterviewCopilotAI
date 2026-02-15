@@ -70,10 +70,12 @@
 
         <footer class="bottom-actions">
           <button id="aiAnswerButton" type="button" class="cta-main">⚡ AI Answer</button>
-          <label class="auto-switch" for="autoAssistToggle" title="Active les réponses automatiques quand l'IA détecte une question dans la conversation.">
-            <span title="Active les réponses automatiques quand l'IA détecte une question dans la conversation.">Auto</span>
-            <input id="autoAssistToggle" type="checkbox" />
-            <span id="autoAssistState" class="switch-state">OFF</span>
+          <label class="auto-switch" title="Active les réponses automatiques quand l'IA détecte une question dans la conversation.">
+            <span class="auto-switch-label">Auto</span>
+            <span class="switch-track">
+              <input id="autoAssistToggle" type="checkbox" aria-label="Activer les réponses automatiques" />
+              <span class="switch-thumb" aria-hidden="true"></span>
+            </span>
           </label>
           <button type="button" class="cta-secondary">🖥 Analyze Screen</button>
         </footer>

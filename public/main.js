@@ -12,7 +12,6 @@ const toggleMicrophoneButton = document.getElementById('toggleMicrophoneButton')
 const clearTranscriptButton = document.getElementById('clearTranscriptButton');
 const aiAnswerButton = document.getElementById('aiAnswerButton');
 const autoAssistToggle = document.getElementById('autoAssistToggle');
-const autoAssistState = document.getElementById('autoAssistState');
 const downloadPdfButton = document.getElementById('downloadPdfButton');
 const languageSelect = document.getElementById('languageSelect');
 const timerPill = document.getElementById('timerPill');
@@ -76,8 +75,10 @@ function setAutoAssistEnabled(enabled) {
     clearTimeout(autoAssistDebounceTimer);
     autoAssistDebounceTimer = null;
   }
-  if (autoAssistToggle) autoAssistToggle.checked = isAutoAssistEnabled;
-  if (autoAssistState) autoAssistState.textContent = isAutoAssistEnabled ? 'ON' : 'OFF';
+  if (autoAssistToggle) {
+    autoAssistToggle.checked = isAutoAssistEnabled;
+    autoAssistToggle.closest('.auto-switch')?.classList.toggle('is-on', isAutoAssistEnabled);
+  }
 }
 
 function triggerAiAnswer({ manual = false } = {}) {
