@@ -601,7 +601,7 @@ function updateSpeakerCamUi() {
     speakerCamPlaceholder.hidden = isSpeakerCamVisible;
   }
   if (speakerCamVideo) {
-    speakerCamVideo.style.visibility = isSpeakerCamVisible ? 'visible' : 'hidden';
+    speakerCamVideo.hidden = !isSpeakerCamVisible;
   }
 }
 
@@ -623,10 +623,24 @@ async function enableSpeakerCam() {
   }
 
   speakerCamVideo.srcObject = speakerCamStream;
+
+  await new Promise((resolve) => {
+    if (speakerCamVideo.readyState >= 1) {
+      resolve();
+      return;
+    }
+    speakerCamVideo.onloadedmetadata = () => resolve();
+  });
+
   try {
     await speakerCamVideo.play();
   } catch {
     // autoplay may be blocked
+  }
+
+  const [videoTrack] = videoTracks;
+  if (videoTrack) {
+    videoTrack.onended = () => disableSpeakerCam();
   }
 
   isSpeakerCamVisible = true;
@@ -1116,7 +1130,9 @@ ${printableContent}
 }
 
 function updateMicButtonLabel() {
-  toggleMicrophoneButton.textContent = isMicrophoneEnabled ? 'Désactiver micro' : 'Activer micro';
+  toggleMicrophoneButton.innerHTML = isMicrophoneEnabled
+    ? '<i class=\"bi bi-mic-mute-fill\" aria-hidden=\"true\"></i> Désactiver micro'
+    : '<i class=\"bi bi-mic-fill\" aria-hidden=\"true\"></i> Activer micro';
 }
 
 document.addEventListener('fullscreenchange', syncFullscreenButton);

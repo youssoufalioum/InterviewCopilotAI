@@ -600,3 +600,11 @@ body {
 .speaker-cam-toggle .bi {
   font-size: 20px;
 }
+
+.ghost-button i {
+  margin-right: 6px;
+}
+
+.speaker-cam-video[hidden] {
+  display: none;
+}
