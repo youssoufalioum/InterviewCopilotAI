@@ -586,3 +586,14 @@ body {
 .bottom-actions .cta-secondary {
   width: 100%;
 }
+
+.timer-pill i,
+.answer-card-head h3 i,
+.cta-main i,
+.cta-secondary i {
+  margin-right: 6px;
+}
+
+.speaker-cam-toggle .bi {
+  font-size: 20px;
+}

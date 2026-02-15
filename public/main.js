@@ -145,7 +145,7 @@ function startTimer() {
   if (timerInterval) return;
   startTimestampMs = Date.now();
   timerInterval = setInterval(() => {
-    timerPill.textContent = `⏱ ${formatElapsed(Date.now() - startTimestampMs)}`;
+    timerPill.innerHTML = `<i class="bi bi-stopwatch" aria-hidden="true"></i> ${formatElapsed(Date.now() - startTimestampMs)}`;
   }, 1000);
 }
 
@@ -154,7 +154,7 @@ function stopTimer() {
     clearInterval(timerInterval);
     timerInterval = null;
   }
-  timerPill.textContent = '⏱ 00:00:00';
+  timerPill.innerHTML = '<i class="bi bi-stopwatch" aria-hidden="true"></i> 00:00:00';
 }
 
 function appendLine(target, text) {
@@ -590,7 +590,7 @@ function clearPreviewStream() {
 
 function updateSpeakerCamUi() {
   if (speakerCamIcon) {
-    speakerCamIcon.textContent = isSpeakerCamVisible ? '🙈' : '👁️';
+    speakerCamIcon.className = isSpeakerCamVisible ? 'bi bi-eye-slash-fill' : 'bi bi-eye-fill';
   }
   if (speakerCamToggle) {
     speakerCamToggle.classList.toggle('is-on', isSpeakerCamVisible);

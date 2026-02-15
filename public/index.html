@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Interview Copilot</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -23,7 +24,7 @@
               <video id="speakerCamVideo" class="speaker-cam-video" autoplay playsinline muted></video>
               <div id="speakerCamPlaceholder" class="speaker-cam-placeholder">Speaker Cam</div>
               <button id="speakerCamToggle" type="button" class="speaker-cam-toggle" aria-label="Activer ou désactiver Speaker Cam" title="Afficher/Masquer Speaker Cam">
-                <span id="speakerCamIcon" aria-hidden="true">👁️</span>
+                <i id="speakerCamIcon" class="bi bi-eye-fill" aria-hidden="true"></i>
               </button>
             </div>
           </div>
@@ -61,21 +62,21 @@
               <option value="it">Italiano</option>
               <option value="pt">Português</option>
             </select>
-            <span id="timerPill" class="timer-pill">⏱ 00:00:00</span>
+            <span id="timerPill" class="timer-pill"><i class="bi bi-stopwatch" aria-hidden="true"></i> 00:00:00</span>
             <button id="toggleAssistant" class="assistant-toggle" type="button">Démarrer l'Assistant</button>
           </div>
         </header>
 
         <article class="answer-card">
           <div class="answer-card-head">
-            <h3>⭐ Suggestions de l'IA</h3>
+            <h3><i class="bi bi-stars" aria-hidden="true"></i> Suggestions de l'IA</h3>
             <button id="downloadPdfButton" type="button" class="ghost-button">Télécharger PDF</button>
           </div>
           <div id="suggestionBox" class="chat-scroll suggestion-box"></div>
         </article>
 
         <footer class="bottom-actions">
-          <button id="aiAnswerButton" type="button" class="cta-main">⚡ AI Answer</button>
+          <button id="aiAnswerButton" type="button" class="cta-main"><i class="bi bi-lightning-charge-fill" aria-hidden="true"></i> AI Answer</button>
           <label class="auto-switch" title="Active les réponses automatiques quand l'IA détecte une question dans la conversation.">
             <span class="auto-switch-label">Auto</span>
             <span class="switch-track">
@@ -83,7 +84,7 @@
               <span class="switch-thumb" aria-hidden="true"></span>
             </span>
           </label>
-          <button type="button" class="cta-secondary">🖥 Analyze Screen</button>
+          <button type="button" class="cta-secondary"><i class="bi bi-display" aria-hidden="true"></i> Analyze Screen</button>
         </footer>
       </section>
     </main>
