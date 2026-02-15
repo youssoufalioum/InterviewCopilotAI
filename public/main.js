@@ -36,6 +36,7 @@ let isTranscriptConnected = false;
 let isMicrophoneEnabled = false;
 let isAutoAssistEnabled = false;
 let lastAutoAssistQuestion = "";
+let autoAssistDebounceTimer = null;
 
 let pendingPCM = new Int16Array(0);
 
@@ -71,6 +72,10 @@ function setStatus(message) {
 
 function setAutoAssistEnabled(enabled) {
   isAutoAssistEnabled = Boolean(enabled);
+  if (!isAutoAssistEnabled && autoAssistDebounceTimer) {
+    clearTimeout(autoAssistDebounceTimer);
+    autoAssistDebounceTimer = null;
+  }
   if (autoAssistToggle) autoAssistToggle.checked = isAutoAssistEnabled;
   if (autoAssistState) autoAssistState.textContent = isAutoAssistEnabled ? 'ON' : 'OFF';
 }
@@ -106,6 +111,19 @@ function triggerAiAnswer({ manual = false } = {}) {
   socket.send(JSON.stringify({ type: 'assistant_answer', context, language, question: detectedQuestion }));
   setStatus(`Demande de réponse IA envoyée pour Question ${aiQuestionCounter}...`);
   return true;
+}
+
+function scheduleAutoAssistCheck(delayMs = 550) {
+  if (!isAutoAssistEnabled || !isRunning) return;
+
+  if (autoAssistDebounceTimer) {
+    clearTimeout(autoAssistDebounceTimer);
+  }
+
+  autoAssistDebounceTimer = setTimeout(() => {
+    autoAssistDebounceTimer = null;
+    triggerAiAnswer({ manual: false });
+  }, delayMs);
 }
 
 function formatElapsed(ms) {
@@ -415,8 +433,8 @@ function finalizeDraft(role) {
   pushTranscriptHistory(role, normalized);
   syncAssistantContext();
 
-  if (role === 'interviewer' && isAutoAssistEnabled && isRunning) {
-    triggerAiAnswer({ manual: false });
+  if (role === 'interviewer') {
+    scheduleAutoAssistCheck(250);
   }
 
   transcriptDrafts[role] = null;
@@ -457,6 +475,10 @@ function appendTranscriptStream(role, text) {
   }
   draft.finalizeTimer = setTimeout(() => finalizeDraft(role), 900);
   ensureDraftTicker(role);
+
+  if (role === "interviewer") {
+    scheduleAutoAssistCheck(900);
+  }
 }
 
 function clearAllDrafts() {
@@ -814,7 +836,18 @@ async function startAssistant() {
     sendInterval = setInterval(sendPendingChunk, 50);
 
     startTimer();
-    setStatus('Assistant actif. En attente du clic AI Answer.');
+
+    if (!isTranscriptConnected) {
+      try {
+        await connectTranscriptChannels();
+      } catch (error) {
+        setStatus(`Assistant actif, mais transcription non connectée: ${formatPermissionError(error)}`);
+      }
+    }
+
+    if (!isTranscriptConnected) {
+      setStatus('Assistant actif. En attente du clic AI Answer.');
+    }
   } catch (error) {
     const userMessage = formatPermissionError(error);
     setStatus(userMessage);
@@ -897,6 +930,10 @@ async function stopAllStreamsAndTranscriptions() {
 
   isMicrophoneEnabled = false;
   updateMicButtonLabel();
+  if (autoAssistDebounceTimer) {
+    clearTimeout(autoAssistDebounceTimer);
+    autoAssistDebounceTimer = null;
+  }
 
   if (document.fullscreenElement === previewStage) {
     await document.exitFullscreen();
