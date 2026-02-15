@@ -5,6 +5,10 @@ const suggestionBox = document.getElementById('suggestionBox');
 const previewStage = document.getElementById('previewStage');
 const previewVideo = document.getElementById('previewVideo');
 const previewPlaceholder = document.getElementById('previewPlaceholder');
+const speakerCamVideo = document.getElementById('speakerCamVideo');
+const speakerCamPlaceholder = document.getElementById('speakerCamPlaceholder');
+const speakerCamToggle = document.getElementById('speakerCamToggle');
+const speakerCamIcon = document.getElementById('speakerCamIcon');
 const fullscreenButton = document.getElementById('fullscreenButton');
 const changeTabButton = document.getElementById('changeTabButton');
 const connectTranscriptButton = document.getElementById('connectTranscriptButton');
@@ -21,6 +25,8 @@ let audioContext;
 let workletNode;
 let microphoneStream;
 let systemStream;
+let speakerCamStream;
+let isSpeakerCamVisible = false;
 let mixedNode;
 let micSource;
 let systemSource;
@@ -582,6 +588,72 @@ function clearPreviewStream() {
   previewPlaceholder.hidden = false;
 }
 
+function updateSpeakerCamUi() {
+  if (speakerCamIcon) {
+    speakerCamIcon.textContent = isSpeakerCamVisible ? '🙈' : '👁️';
+  }
+  if (speakerCamToggle) {
+    speakerCamToggle.classList.toggle('is-on', isSpeakerCamVisible);
+    speakerCamToggle.title = isSpeakerCamVisible ? 'Masquer / éteindre Speaker Cam' : 'Afficher / allumer Speaker Cam';
+    speakerCamToggle.setAttribute('aria-pressed', isSpeakerCamVisible ? 'true' : 'false');
+  }
+  if (speakerCamPlaceholder) {
+    speakerCamPlaceholder.hidden = isSpeakerCamVisible;
+  }
+}
+
+async function enableSpeakerCam() {
+  if (!speakerCamStream) {
+    speakerCamStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        width: { ideal: 640 },
+        height: { ideal: 360 },
+        frameRate: { ideal: 24, max: 30 }
+      },
+      audio: false
+    });
+  }
+
+  speakerCamVideo.srcObject = speakerCamStream;
+  try {
+    await speakerCamVideo.play();
+  } catch {
+    // autoplay may be blocked
+  }
+
+  isSpeakerCamVisible = true;
+  updateSpeakerCamUi();
+}
+
+function disableSpeakerCam() {
+  if (speakerCamStream) {
+    speakerCamStream.getTracks().forEach((track) => track.stop());
+    speakerCamStream = null;
+  }
+
+  if (speakerCamVideo) {
+    speakerCamVideo.pause();
+    speakerCamVideo.srcObject = null;
+  }
+
+  isSpeakerCamVisible = false;
+  updateSpeakerCamUi();
+}
+
+async function toggleSpeakerCam() {
+  if (isSpeakerCamVisible) {
+    disableSpeakerCam();
+    return;
+  }
+
+  try {
+    await enableSpeakerCam();
+  } catch (error) {
+    setStatus(formatPermissionError(error));
+    disableSpeakerCam();
+  }
+}
+
 async function requestSystemShare() {
   return navigator.mediaDevices.getDisplayMedia({
     video: {
@@ -975,6 +1047,7 @@ async function stopAllStreamsAndTranscriptions() {
   }
 
   clearPreviewStream();
+  disableSpeakerCam();
 
   isMicrophoneEnabled = false;
   updateMicButtonLabel();
@@ -1046,6 +1119,10 @@ fullscreenButton.addEventListener('click', () => {
 
 changeTabButton.addEventListener('click', () => {
   handleChangeTab();
+});
+
+speakerCamToggle.addEventListener('click', () => {
+  toggleSpeakerCam();
 });
 
 languageSelect.addEventListener('change', async () => {
@@ -1160,6 +1237,7 @@ toggleButton.addEventListener('click', async () => {
     await stopAssistant();
     await stopAllStreamsAndTranscriptions();
     setAutoAssistEnabled(false);
+updateSpeakerCamUi();
     lastAutoAssistQuestion = '';
     return;
   }
@@ -1169,3 +1247,4 @@ toggleButton.addEventListener('click', async () => {
 syncFullscreenButton();
 updateMicButtonLabel();
 setAutoAssistEnabled(false);
+updateSpeakerCamUi();

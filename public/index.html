@@ -19,7 +19,13 @@
               <video id="previewVideo" class="preview-video" autoplay playsinline muted></video>
               <div id="previewPlaceholder" class="preview-placeholder">Screen / Meeting Preview</div>
             </div>
-            <div class="video-side">Speaker Cam</div>
+            <div id="speakerCamStage" class="video-side speaker-cam-stage">
+              <video id="speakerCamVideo" class="speaker-cam-video" autoplay playsinline muted></video>
+              <div id="speakerCamPlaceholder" class="speaker-cam-placeholder">Speaker Cam</div>
+              <button id="speakerCamToggle" type="button" class="speaker-cam-toggle" aria-label="Activer ou désactiver Speaker Cam" title="Afficher/Masquer Speaker Cam">
+                <span id="speakerCamIcon" aria-hidden="true">👁️</span>
+              </button>
+            </div>
           </div>
         </div>
 
