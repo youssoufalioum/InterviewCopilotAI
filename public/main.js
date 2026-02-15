@@ -600,6 +600,9 @@ function updateSpeakerCamUi() {
   if (speakerCamPlaceholder) {
     speakerCamPlaceholder.hidden = isSpeakerCamVisible;
   }
+  if (speakerCamVideo) {
+    speakerCamVideo.style.visibility = isSpeakerCamVisible ? 'visible' : 'hidden';
+  }
 }
 
 async function enableSpeakerCam() {
@@ -612,6 +615,11 @@ async function enableSpeakerCam() {
       },
       audio: false
     });
+  }
+
+  const videoTracks = speakerCamStream.getVideoTracks();
+  if (!videoTracks.length) {
+    throw new Error("Aucune piste vidéo webcam détectée.");
   }
 
   speakerCamVideo.srcObject = speakerCamStream;
