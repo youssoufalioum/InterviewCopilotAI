@@ -32,3 +32,8 @@ Puis ouvrez `http://localhost:3000`.
 ## Stack Realtime
 
 Le backend utilise désormais le SDK officiel `openai` et l'API Realtime (`wss://api.openai.com/v1/realtime`) pour recevoir l'audio PCM16 16kHz, produire des transcriptions et générer des suggestions IA en direct.
+
+
+## Mode Realtime unique
+
+Le serveur fonctionne en **single-flow** : un seul flux Realtime OpenAI gère à la fois les événements de transcription (`transcriptDelta` / `transcript`) et les réponses assistant (`suggestion`), sans pipeline secondaire de post-correction.

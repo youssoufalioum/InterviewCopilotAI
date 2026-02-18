@@ -229,7 +229,7 @@ Answer only from this context, do not invent facts, and structure response in co
     upstream.send(JSON.stringify(buildSessionConfig(channel, state.language)));
     sendToClient(clientSocket, {
       type: 'status',
-      message: `Connected to OpenAI Realtime - channel: ${channel}, language: ${state.language}`
+      message: `Connected to OpenAI Realtime (single-flow) - channel: ${channel}, language: ${state.language}`
     });
   });
 
